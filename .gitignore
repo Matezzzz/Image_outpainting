@@ -4,3 +4,5 @@ maskgit-main
 wandb
 __pycache__
 .vscode
+artifacts
+tokenizer

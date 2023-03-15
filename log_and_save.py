@@ -22,6 +22,11 @@ class EvaluateFunc:
 
 WANDB_USER_DEFAULT = "matezzzz"
 class WandbManager:
+    user : str
+    project : str
+    resumed_run : object
+    
+    
     def __init__(self, project, user = WANDB_USER_DEFAULT):
         self.user = user
         self.project = project
@@ -30,6 +35,7 @@ class WandbManager:
         self.resumed_run = None
         self.resume_args = args
         wandb.init(project=self.project, config=args)
+        wandb.run.log_code(".")
         
     def resume(self, resume_name_part, args):
         api = wandb.Api()
@@ -47,6 +53,7 @@ class WandbManager:
                     print (f"Failed to load value: '{key}': {val}")
         self.resume_args = argparse.Namespace(**self.resume_args)
         wandb.init(project=self.project, config=self.resume_args, resume="must", id=self.resumed_run.id)
+        wandb.run.log_code(".")
 
     @property
     def resumed(self): return self.resumed_run is not None
@@ -91,13 +98,13 @@ class ModelSave:
         self.perfecting_threshold = perfecting_threshold
         
         self.training = True
-            
+        
         if resume_name_part is None:
             wandb.init(project=project, config=args)
         else:
             self.wandb_manager.resume(resume_name_part, args)
             
-        wandb.run.log_code(".")
+        
         self.stop_file_name = f"stop_{wandb.run.name}.txt"
         with open(self.stop_file_name, 'w') as f: f.write("N")
     

@@ -1,4 +1,4 @@
-#13.3. 
+#12.3. 
 
 Working on basic image segmentation so I can use the webcam data (I want those because there is much more of it, I could train a model from scratch just for clouds)
 
@@ -11,5 +11,18 @@ Working on basic image segmentation so I can use the webcam data (I want those b
             * add closing, fill small empty regions, empty small filled regions, if there is a region spanning from left to right border, fill everything below it
         * If a mask occurs at multiple consecutive times, it will be in the final mask too
 
+#13.3.
+
+* Should implement the neural nets - I will rewrite the provided implementation in tensorflow, just read the code so far
 
 #14.3.
+
+* start implementing the tokenizer
+    * Using a slightly different upscaling in the decoder (residual instead of nearest scale + convolution)
+    * Some operations are slightly different compared to original maskgit so the code is simpler (entropy loss is missing for example)
+
+#15.3
+
+* tokenizer doesn't train, latent losses suspiciouslty low. Try training without quantizer + codebook -> was due to a bug. Now just a VAE works
+* codebook works as well. Samples are quite low quality and latent losses are still extremely small
+* Problem - ordered images, need a larger shuffle limit
