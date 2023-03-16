@@ -24,9 +24,12 @@ parser.add_argument("--residual_layer_multipliers", default=[1, 2, 3], type=list
 parser.add_argument("--num_res_blocks", default=2, type=int, help="Number of residual blocks in sequence before a downscale")
 parser.add_argument("--embedding_dim", default=32, type=int, help="Embedding dimension for quantizer")
 parser.add_argument("--codebook_size", default=128, type=int, help="Codebook size for quantizer")
+parser.add_argument("--embedding_loss_weight", default=1.0, type=float, help="Scale the embedding loss")
 parser.add_argument("--commitment_loss_weight", default=0.25, type=float, help="Scale for the commitment loss (penalize changing embeddings)")
-parser.add_argument("--entropy_loss_weight", default=0.1, type=float, help="Scale for the entropy loss")
+parser.add_argument("--entropy_loss_weight", default=0.05, type=float, help="Scale for the entropy loss")
 parser.add_argument("--entropy_loss_temperature", default=0.01, type=float, help="Entropy loss temperature")
+parser.add_argument("--data_dir", default="brno", type=str, help="Directory to read data from")
+parser.add_argument("--mask_fname", default="final_mask_brno.png", type=str, help="Segmentation mask for a directory")
 
 
 
@@ -36,16 +39,16 @@ parser.add_argument("--entropy_loss_temperature", default=0.01, type=float, help
 
 
 class VectorQuantizer(tf.keras.layers.Layer):
-    def __init__(self, codebook_size, embedding_dim, commitment_loss_weight, entropy_loss_weight, entropy_loss_temperature, **kwargs):
+    def __init__(self, codebook_size, embedding_dim, embedding_loss_weight, commitment_loss_weight, entropy_loss_weight, entropy_loss_temperature, **kwargs):
         super().__init__(**kwargs)
-        self._args = args
+        #these need to be easily accessed in the training loop
         self.codebook_size = codebook_size
         self.embedding_dim = embedding_dim
+        self.embedding_loss_weight = embedding_loss_weight
         self.commitment_loss_weight = commitment_loss_weight
         self.entropy_loss_weight = entropy_loss_weight
         self.entropy_loss_temperature = entropy_loss_temperature
-        self.codebook = self.add_weight("codebook", [args.codebook_size, args.embedding_dim], tf.float32, tf.keras.initializers.RandomUniform(-5, 5))
-        self._mse = tf.keras.losses.MeanSquaredError()
+        self.codebook = self.add_weight("codebook", [codebook_size, embedding_dim], tf.float32, tf.keras.initializers.RandomUniform())
     
     def get_embedding(self, tokens):
         #batch dims = [batch, width, height]
@@ -64,16 +67,24 @@ class VectorQuantizer(tf.keras.layers.Layer):
         distances = self.get_distances(inputs)
         tokens = self.get_tokens(distances)
         embeddings = self.get_embedding(tokens)
-        self.add_loss(self.entropy_loss_weight * self.compute_entropy_loss(distances))
-        self.add_loss(self._mse(tf.stop_gradient(inputs), embeddings) * self.commitment_loss_weight)
-        self.add_loss(self._mse(tf.stop_gradient(embeddings), inputs))
+        
+        _, _, counts = tf.unique_with_counts(tf.reshape(tokens, [-1]))
+        self.add_metric(tf.cast(tf.shape(counts)[0], tf.float32), "codebook_keys_used")
+        
+        embedding_loss = self.embedding_loss_weight * tf.reduce_mean((tf.stop_gradient(embeddings) - inputs)**2)
+        commitment_loss = self.commitment_loss_weight * tf.reduce_mean((embeddings - tf.stop_gradient(inputs))**2)
+        #move all embeddings to their closest vector
+        entropy_loss = self.entropy_loss_weight * tf.reduce_mean(tf.reduce_min(tf.reshape(distances, [-1, self.codebook_size]), 0)) #self.compute_entropy_loss(distances)
+        
+        self.add_loss(commitment_loss + embedding_loss+ entropy_loss)
+        self.add_metric(commitment_loss, "commitment_loss"); self.add_metric(embedding_loss, "embedding_loss"); self.add_metric(entropy_loss, "entropy_loss")
         if training: embeddings = inputs + tf.stop_gradient(embeddings - inputs)
         return embeddings
     
         
     def compute_entropy_loss(self, distances):
         #shape [all_points, codebook_size]
-        affinity = tf.reshape(-distances, [-1, tf.shape(distances)[-1]]) / self._args.entropy_loss_temperature
+        affinity = tf.reshape(-distances, [-1, tf.shape(distances)[-1]]) / self.entropy_loss_temperature
         probs = tf.nn.softmax(affinity, -1)
         log_probs = tf.nn.log_softmax(affinity+1e-5, -1)
         avg_probs = tf.reduce_mean(probs, 0)
@@ -85,29 +96,33 @@ class VectorQuantizer(tf.keras.layers.Layer):
 
     def get_config(self):
         config = super().get_config()
-        return config.update({
+        config.update({
             "codebook_size":self.codebook_size,
             "embedding_dim":self.embedding_dim,
+            "embedding_loss_weight":self.embedding_loss_weight,
             "commitment_loss_weight":self.commitment_loss_weight,
             "entropy_loss_weight":self.entropy_loss_weight,
             "entropy_loss_temperature":self.entropy_loss_temperature
         })
+        return config
     
     
         
 
 
-def create_encoder(args):
-    return NetworkOp(lambda x: nb.conv2DDown(filters=10)(x)\
-        >> nb.residualDownscaleSequence(args.filters * np.array(args.residual_layer_multipliers), args.num_res_blocks, nb.groupnorm, nb.swish)\
+def create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim):
+    return NetworkOp(lambda x:\
+           nb.conv2DDown(filters=10)(x)\
+        >> nb.residualDownscaleSequence(filters * np.array(residual_layer_multipliers), num_res_blocks, nb.groupnorm, nb.swish)\
         >> nb.groupnorm()\
         >> nb.swish()\
-        >> nb.conv2D(args.embedding_dim, kernel_size=1)
+        >> nb.conv2D(embedding_dim, kernel_size=1)
     )
 
-def create_decoder(args):
-    return NetworkOp(lambda x:nb.conv2D(filters=args.embedding_dim)(x)\
-        >> nb.residualUpscaleSequence(args.filters * np.array(args.residual_layer_multipliers[::-1]), args.num_res_blocks, nb.groupnorm, nb.swish)\
+def create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim):
+    return NetworkOp(lambda x:\
+           nb.conv2D(filters=embedding_dim)(x)\
+        >> nb.residualUpscaleSequence(filters * np.array(residual_layer_multipliers[::-1]), num_res_blocks, nb.groupnorm, nb.swish)\
         >> nb.groupnorm()\
         >> nb.swish()\
         >> nb.conv2DUp(filters=6, activation="relu")\
@@ -116,65 +131,42 @@ def create_decoder(args):
 
 
 
-class VQVAEModel(tf.keras.Model):
-    def __init__(self, args : argparse.Namespace):
-        super().__init__()
+class VQVAEModel:
+    def __init__(self, img_size, filters, residual_layer_multipliers, num_res_blocks, embedding_dim, args):
+        
         self._quantizer = VectorQuantizer(
             args.codebook_size,
             args.embedding_dim,
+            args.embedding_loss_weight,
             args.commitment_loss_weight,
             args.entropy_loss_weight,
             args.entropy_loss_temperature
         )
-        inp_shape = [args.img_size, args.img_size, 3]
-        self._encode_model = nb.inp(inp_shape) >> create_encoder(args) >> nb.model()
-        self._decode_model = nb.inp(self._encode_model.output_shape[1:]) >> create_decoder(args) >> nb.model()
-        self._mse = tf.losses.MeanSquaredError()
-        self._args = args
-        self._optimizer = tf.keras.optimizers.Adam()
-        self.compile()
-        
-    @tf.function
-    def train_step(self, data):
-        with tf.GradientTape() as tape:
-            #encoded, tokens, tokens_embed, decoded, entropy_loss = self.run_model(data, True)
-            
-            reconstruction_loss = self._mse(data, self(data, True))
-            #e_latent_loss = self._mse(tf.stop_gradient(tokens_embed), encoded) * self._args.commitment_loss_weight
-            #q_latent_loss = self._mse(tf.stop_gradient(encoded), tokens_embed)
 
-            e_latent_loss, q_latent_loss, entropy_loss = self._quantizer.losses
-            loss = reconstruction_loss + e_latent_loss + q_latent_loss + entropy_loss
-            
-        self._optimizer.minimize(
-            loss,
-            (self._encode_model.trainable_variables, self._decode_model.trainable_variables, self._quantizer.trainable_variables),
-            tape=tape
-        )
-        losses = {"reconstruction_loss": reconstruction_loss, "e_latent_loss":e_latent_loss, "q_latent_loss":q_latent_loss, "entropy_loss":entropy_loss}
-        return losses
+        #self.codebook_size = args.codebook_size
+        inp_shape = [img_size, img_size, 3]
+        self._encode_model = nb.inp(inp_shape) >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim) >> nb.model()
+        self._decode_model = nb.inp(self._encode_model.output_shape[1:]) >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim) >> nb.model()
+        self._model = nb.inp(inp_shape) >> TensorflowOp(self._encode_model) >> TensorflowOp(self._quantizer) >> TensorflowOp(self._decode_model) >> nb.model()
+        data_variance = 0.0915055541062209
+        def scaled_mse_loss(y_true, y_pred): return tf.reduce_mean((y_true-y_pred)**2) / data_variance
+        self._model.compile(tf.keras.optimizers.Adam(), scaled_mse_loss, metrics=[tf.keras.metrics.MeanSquaredError("reconstruction_loss")])
+        
+    def get_model(self):
+        return self._model
         
     def generate_samples(self, count):
-        tokens = np.random.randint(0, self._args.codebook_size, [count, self._encode_model.output_shape[1], self._encode_model.output_shape[2]])
+        tokens = np.random.randint(0, self._quantizer.codebook_size, [count, self._encode_model.output_shape[1], self._encode_model.output_shape[2]])
         embed_tokens = self._quantizer.get_embedding(tokens)
         return self._decode_model.predict(embed_tokens)
     
-    def call(self, data, training):
-        return self._decode_model(self._quantizer(self._encode_model(data, training), training), training)
-        # encoded = self._encode_model(data)
-        # tokens, entropy_loss = self._quantizer.get_tokens(encoded, train)
-        # tokens_embed = self._quantizer.get_embedding(tokens)
-        # if train: tokens_embed = tokens_embed + tf.stop_gradient(encoded - tokens_embed)
-        # decoded = self._decode_model(tokens_embed)
-        # return (encoded, tokens, tokens_embed, decoded, entropy_loss)
+    def load(self, dirname):
+        self._model = tf.keras.models.load_model(dirname, custom_objects={"VectorQuantizer":VectorQuantizer})
+        self._encode_model = self._model.get_layer(index=1) #type: ignore
+        self._quantizer = self._model.get_layer(index=2) #type: ignore
+        self._decode_model = self._model.get_layer(index=3) #type: ignore
+        
     
-    # def call(self, data, training, mask):
-    #     return self(data, training)
-    def get_config(self):
-        config = super().get_config()
-        return config | {
-            
-        }
             
 def main(args):
     #tf.config.set_visible_devices([], "GPU")
@@ -193,15 +185,19 @@ def main(args):
         def log(self, batch, logs):
             if batch % 400 == 0:
                 generated = self._model.generate_samples(10)
-                data = next(self._dataset)
-                reconstructed = self._model.predict(data)
-                wandb.log({"images": [wandb.Image(d) for d in data], "reconstruction":[wandb.Image(d) for d in reconstructed], "generated_images": [wandb.Image(d) for d in generated]})
+                data, _ = next(self._dataset)
+                reconstructed = self._model.get_model().predict(data)
+                wandb.log({
+                    "images": [wandb.Image(d) for d in data],
+                    "reconstruction":[wandb.Image(d) for d in reconstructed],
+                    "generated_images": [wandb.Image(d) for d in generated]
+                }, commit=False)
     
     
     
     image_size = np.array([1600, 1200]) // 4
     
-    mask = np.asarray(Image.open("masks/final_mask_brno.png").resize(tuple(image_size)))
+    mask = np.asarray(Image.open(args.mask_fname).resize(tuple(image_size)))
     data_boxes = []
     while len(data_boxes) < 10:
         x, y = np.random.randint(0, image_size - 1 - args.img_size, 2)
@@ -209,41 +205,45 @@ def main(args):
             data_boxes.append([x, y])
         
     
-    image_fnames = glob.glob("brno/*/*.jpg")
+    image_fnames = glob.glob(f"{args.data_dir}/*/*.jpg")
     random.shuffle(image_fnames)
     def create_dataset(batch_size):
         def load_images():
             for i in image_fnames:
                 img = np.asarray(Image.open(i).resize(tuple(image_size))) / 255.0
+                if np.min(np.sum(img, -1)) < 0.1: continue
                 for a, b in data_boxes:
                     x = img[a:a+args.img_size,b:b+args.img_size]
-                    yield x.astype(np.float32)
+                    
+                    yield x, x
         
         #d = tf.keras.utils.image_dataset_from_directory("brno", labels=None, batch_size=None, image_size=image_size.T) # type: ignore
         #def select_areas(img):
         #    return tf.data.Dataset.from_tensor_slices([img / 255.0 for a, b in data_boxes])
         #d = d.flat_map(select_areas)
+        img_spec = tf.TensorSpec(shape=(args.img_size, args.img_size, 3), dtype=tf.float32) # type: ignore
+        
         d = tf.data.Dataset.from_generator(
             load_images,
-            output_signature=tf.TensorSpec(shape=(args.img_size, args.img_size, 3), dtype=tf.float32) # type: ignore
+            output_signature=(img_spec, img_spec)
         )
         return d.shuffle(100).batch(batch_size).prefetch(tf.data.AUTOTUNE)
     
     train_dataset = create_dataset(args.batch_size)
     val_dataset = create_dataset(10)
-        
     
-    #model = VQVAEModel(args)
-    model = tf.keras.models.load_model("artifacts\\run_3upcsyi1_model-v1", custom_objects={"VQVAEModel":VQVAEModel, "VectorQuantizer":VectorQuantizer})
+    model = VQVAEModel(args.img_size, args.filters, args.residual_layer_multipliers, args.num_res_blocks, args.embedding_dim, args)
+    #model.load("tokenizer")
     
     wandb_manager = log_and_save.WandbManager("image_outpainting_tokenizer")
     wandb_manager.start(args)
     model_log = ModelLog(model, val_dataset)
     
-    model.fit(train_dataset, epochs=args.epochs, callbacks=[
+    model.get_model().fit(train_dataset, epochs=args.epochs, callbacks=[ #type: ignore
         tf.keras.callbacks.LambdaCallback(on_batch_end=model_log.log),
-        WandbMetricsLogger(20),
-        WandbModelCheckpoint("tokenizer", "reconstruction_loss", save_freq=100)])
+        WandbMetricsLogger(50),
+        WandbModelCheckpoint("tokenizer", "reconstruction_loss", save_freq=5000)]
+    )
     
 
 if __name__ == "__main__":

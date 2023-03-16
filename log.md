@@ -26,3 +26,4 @@ Working on basic image segmentation so I can use the webcam data (I want those b
 * tokenizer doesn't train, latent losses suspiciouslty low. Try training without quantizer + codebook -> was due to a bug. Now just a VAE works
 * codebook works as well. Samples are quite low quality and latent losses are still extremely small
 * Problem - ordered images, need a larger shuffle limit
+* Ditched subclassing for functional API - we will use slightly more memory when training, but saving should be easier

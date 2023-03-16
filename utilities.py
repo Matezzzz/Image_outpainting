@@ -177,6 +177,14 @@ def image_segmentation_based(img_gen):
         print ("#", end="", flush=True)
     print()
 
+
+import random
+a = glob.glob("brno/*/*.jpg")
+random.shuffle(a)
+print(np.var([np.asarray(Image.open(f))/255.0 for f in a[:100]]))
+    
+
+
 def compute_final_mask(dirname, fname):
     consecutive_sum = np.zeros([image_height, image_width])
     max_sum = np.zeros_like(consecutive_sum)
