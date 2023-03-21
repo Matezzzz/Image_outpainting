@@ -2,9 +2,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 
-
 class Network:
-    #add support for late evaluation
     def __init__(self, tensor, inputs = []):
         self.value = tensor
         self.inputs = inputs
@@ -88,11 +86,15 @@ class NetworkBuild:
 
     network = lambda val: Network(val)
     
+    @staticmethod
     def dense(*args, **kwargs): return tL(tf.keras.layers.Dense, *args, **kwargs)
         
     @staticmethod
     def repeat(repeats, axis): return tOp(lambda x: tf.repeat(x, repeats, axis))
         
+    @staticmethod
+    def range(stop): return Network(tf.range(stop))    
+    
     #dense = lambda u, act = None: TensorflowOp(tf.keras.layers.Dense(u, activation=act))
 
     # @staticmethod
@@ -102,10 +104,19 @@ class NetworkBuild:
 
     #flatten = lambda batch_dims = 1:   TensorflowOp(lambda x:NetworkBuild.flattenInternal(batch_dims, x))
 
+    @staticmethod
+    def reshape(new_shape): return tOp(lambda x: tf.reshape(x, new_shape))
+
     flatten = lambda: tL(tf.keras.layers.Flatten)
     batchnorm = lambda: tL(tf.keras.layers.BatchNormalization)
+    layerNorm = lambda: tL(tf.keras.layers.LayerNormalization)
     groupnorm = lambda: tL(tfa.layers.GroupNormalization, groups=16)
 
+    @staticmethod
+    def dropout(rate): return tL(tf.keras.layers.Dropout, rate)
+
+    @staticmethod
+    def embed(input_dim, output_dim): return tL(tf.keras.layers.Embedding, input_dim, output_dim)
 
     relu = tOp(tf.nn.relu)
     swish = tOp(tf.nn.swish)

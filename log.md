@@ -27,3 +27,6 @@ Working on basic image segmentation so I can use the webcam data (I want those b
 * codebook works as well. Samples are quite low quality and latent losses are still extremely small
 * Problem - ordered images, need a larger shuffle limit
 * Ditched subclassing for functional API - we will use slightly more memory when training, but saving should be easier
+
+#16.3.
+* training works! I added a loss that moves codebook keys to the closest vector - this should avoid completely unused vectors
