@@ -1,6 +1,5 @@
 
 import skimage.measure
-import numba
 import cv2
 import numpy as np
 from utilities import save_image, open_image, get_mask_fname, get_time_mask_fname
@@ -12,7 +11,6 @@ def opening(img): return dilation(erosion(img))
 def closing(img): return erosion(dilation(img))
 
 
-@numba.njit
 def fill_below(img, labels, label):
     for x in range(img.shape[1]):
         write = False

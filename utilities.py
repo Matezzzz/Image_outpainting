@@ -35,6 +35,12 @@ def get_time_mask_fname(place, time):
 def get_mask_fname(place):
     return f"masks/{place}_mask.png"
 
+def get_tokenizer_fname():
+    return "models/tokenizer"
+
+def get_maskgit_fname():
+    return "models/maskgit"
+
 
 # import random
 # a = glob.glob("brno/*/*.jpg")
