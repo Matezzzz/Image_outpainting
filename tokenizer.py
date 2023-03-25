@@ -32,7 +32,7 @@ parser.add_argument("--threads", default=8, type=int, help="Maximum number of th
 parser.add_argument("--img_size", default=128, type=int, help="Input image size")
 parser.add_argument("--activation", default="swish", type=str, help="Activation func for convolutions")
 parser.add_argument("--filters", default=32, type=int, help="Base residual layer filters")
-parser.add_argument("--residual_layer_multipliers", default=[1, 2, 3], type=list, help="How many residual layers to use and how to increase number of filters")
+parser.add_argument("--residual_layer_multipliers", default=[1, 1, 2, 3], type=list, help="How many residual layers to use and how to increase number of filters")
 parser.add_argument("--num_res_blocks", default=2, type=int, help="Number of residual blocks in sequence before a downscale")
 parser.add_argument("--embedding_dim", default=32, type=int, help="Embedding dimension for quantizer")
 parser.add_argument("--codebook_size", default=128, type=int, help="Codebook size for quantizer")
@@ -163,9 +163,9 @@ class VQVAEModel:
 
         inp_shape = [img_size, img_size, 3]
         #emb_size = img_size // 2 // 2**(len(residual_layer_multipliers)-1)
-        self._encode_model = nb.create_model(nb.inp(inp_shape), lambda x: x >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
-        self._decode_model = nb.create_model(nb.inp(self._encode_model.output_shape[1:]), lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
-        self._model = nb.create_model(nb.inp(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
+        self._encode_model = nb.create_model(nb.inpT(inp_shape), lambda x: x >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
+        self._decode_model = nb.create_model(nb.inpT(self._encode_model.output_shape[1:]), lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
+        self._model = nb.create_model(nb.inpT(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
 
         self._model.compile(tf.keras.optimizers.Adam(), scaled_mse_loss, metrics=[tf.keras.metrics.MeanSquaredError("reconstruction_loss")])
 

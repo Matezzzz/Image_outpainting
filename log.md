@@ -30,3 +30,16 @@ Working on basic image segmentation so I can use the webcam data (I want those b
 
 #16.3.
 * training works! I added a loss that moves codebook keys to the closest vector - this should avoid completely unused vectors
+
+
+#24.3.
+
+*maskgit training
+ * 93 - no transformer, just dense -> kinda clueless, but can copy patches
+ * 95 - no transformer + sample_weights
+ * 96 - one transformer + sample weights
+ * 98 - all transformers, residual connections
+ * 101 - one transformer, maskgit logits
+ * 102 - two transformers, maskgit logits
+ * 107 - one transformer, actual decoding, maskgit logits
+ * 109 - two transformers, actua decoding, maskgit logits, smaller batch size (16 out of 32)

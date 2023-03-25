@@ -79,7 +79,10 @@ class RecursiveNetworkOp:
 
 
 class NetworkBuild:
-    inp = lambda shape, *args, **kwargs: Tensor(tf.keras.layers.Input(shape, *args, **kwargs))
+    inp = lambda shape, *args, **kwargs: tf.keras.layers.Input(shape, *args, **kwargs)
+    @classmethod
+    def inpT(cls, shape, *args, **kwargs): return Tensor(cls.inp(shape, *args, **kwargs))
+
 
     @classmethod
     def create_model(cls, input : Tensor, out_func : Callable[[Tensor], Tensor], name=None):
@@ -134,17 +137,17 @@ nb = NetworkBuild
 
 class ConvNetworkBuild (NetworkBuild):
     @staticmethod
-    def conv2D(*args, padding="same", kernel_size=(3, 3), **kwargs):
-        return tf.keras.layers.Conv2D(*args, padding=padding, kernel_size=kernel_size, **kwargs)
+    def conv2D(filters, kernel_size=(3, 3), strides=(1, 1), padding="same", **kwargs):
+        return tf.keras.layers.Conv2D(filters, kernel_size, strides, padding, **kwargs)
     @classmethod
-    def conv2DDown(cls, *args, **kwargs):
-        return cls.conv2D(*args, strides=2, **kwargs)
+    def conv2DDown(cls, filters, kernel_size=(3, 3), strides=(2, 2), padding="same", **kwargs):
+        return cls.conv2D(filters, kernel_size, strides, padding, **kwargs)
     @staticmethod
     def maxPool(*args, **kwargs):
         return tf.keras.layers.MaxPool2D(*args, pool_size=3, strides=2, **kwargs)
     @staticmethod
-    def conv2DUp(*args, padding="same", kernel_size=(3, 3), strides=2, **kwargs):
-        return tf.keras.layers.Conv2DTranspose(*args, padding=padding, kernel_size=kernel_size, strides=strides, **kwargs)
+    def conv2DUp(filters, kernel_size=(3, 3), strides=(2, 2), padding="same", **kwargs):
+        return tf.keras.layers.Conv2DTranspose(filters, kernel_size, strides, padding, **kwargs)
     
     #conv2d = lambda filters, kernel=3, stride=1, bias=True, padding="same", act=None: TensorflowOp(tf.keras.layers.Conv2D(filters, kernel, strides=stride, padding=padding, use_bias=bias, activation=act))
     #conv2ddown = lambda filters:                            ConvNetworkBuild.conv2d(filters, stride=2)
