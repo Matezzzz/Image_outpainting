@@ -1,7 +1,7 @@
 import os
 GPU_TO_USE = int(open("gpu_to_use.txt").read().splitlines()[0])
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" if GPU_TO_USE == -1 else str(GPU_TO_USE)
-#os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
@@ -314,15 +314,11 @@ class MaskGIT(tf.keras.Model):
         #return self.decode(input_tokens)[1]
 
     @staticmethod
-    def load(dirname):
-        #mgit = MaskGIT.__new__(MaskGIT)
-        #super(MaskGIT, mgit).__init__()
-        mgit = tf.keras.models.load_model(dirname, custom_objects={
+    def load(dirname) -> "MaskGIT":
+        return tf.keras.models.load_model(dirname, custom_objects={
             "MaskGIT":MaskGIT, "BiasLayer":BiasLayer, "TokenEmbedding":TokenEmbedding,
             "TransformerLayer":TransformerLayer, "TransformerMLP":TransformerMLP, "TransformerAttention":TransformerAttention
-        })
-        #mgit._transformer_model = mgit.get_layer(MASKGIT_TRANSFORMER_NAME) #type: ignore
-        return mgit
+        }) #type:ignore
         
         
     def get_config(self):

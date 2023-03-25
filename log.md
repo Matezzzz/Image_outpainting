@@ -42,4 +42,4 @@ Working on basic image segmentation so I can use the webcam data (I want those b
  * 101 - one transformer, maskgit logits
  * 102 - two transformers, maskgit logits
  * 107 - one transformer, actual decoding, maskgit logits
- * 109 - two transformers, actua decoding, maskgit logits, smaller batch size (16 out of 32)
+ * 109 - two transformers, actual decoding, maskgit logits, smaller batch size (16 out of 32)

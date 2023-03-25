@@ -1,7 +1,7 @@
 import os
 GPU_TO_USE = int(open("gpu_to_use.txt").read().splitlines()[0])
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" if GPU_TO_USE == -1 else str(GPU_TO_USE)
-#os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
@@ -162,7 +162,7 @@ class VQVAEModel:
         self._quantizer = VectorQuantizer.new(args)
 
         inp_shape = [img_size, img_size, 3]
-        #emb_size = img_size // 2 // 2**(len(residual_layer_multipliers)-1)
+        #emb_size = 
         self._encode_model = nb.create_model(nb.inpT(inp_shape), lambda x: x >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
         self._decode_model = nb.create_model(nb.inpT(self._encode_model.output_shape[1:]), lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
         self._model = nb.create_model(nb.inpT(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
@@ -195,6 +195,11 @@ class VQVAEModel:
 
     @property
     def latent_space_size(self): return self._encode_model.output_shape[1:3]
+    
+    @property
+    def downscale_multiplier(self):
+        a, b = self._encode_model.input_shape[1:3], self.latent_space_size
+        return  a[0]//b[0], a[1]//b[1] 
 
     def encode(self, image):
         return self._quantizer.get_tokens(self._quantizer.get_distances(self._encode_model(image)))
@@ -205,7 +210,7 @@ class VQVAEModel:
 
 
 def main(args):
-    #tf.config.set_visible_devices([], "GPU")
+    if GPU_TO_USE == -1: tf.config.set_visible_devices([], "GPU")
 
     tf.keras.utils.set_random_seed(args.seed)
     tf.config.threading.set_inter_op_parallelism_threads(args.threads)
