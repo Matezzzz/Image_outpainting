@@ -3,7 +3,9 @@ import tensorflow as tf
 
 
 class Tensor:
-    def __init__(self, tensor):
+    tensor : tf.Tensor
+    
+    def __init__(self, tensor : tf.Tensor):
         self.tensor = tensor
 
     def __rshift__(self, op) -> "Tensor":
@@ -24,58 +26,11 @@ class Tensor:
 
     def get(self):
         return self.tensor
+    
+    def __getitem__(self, *args):
+        return Tensor(self.tensor.__getitem__(*args))
 
 
-
-
-# class BaseNetworkOp:
-#     def __init__(self, func, is_type=lambda n:type(n) is Network):
-#         self.f = func
-#         self.is_type = is_type
-
-#     def __call__(self, val):
-#         if not self.is_type(val): raise TypeError("Invalid __call__ parameter")
-#         return self.f(val)
-
-
-# class TensorflowOp(BaseNetworkOp):
-#     def __init__(self, func):
-#         super().__init__(lambda n: Network(func(n.value), n.inputs))
-
-# class NetworkOp (BaseNetworkOp):
-#     def __init__(self, func):
-#         super().__init__(lambda n: func(n))
-
-# class ValueNetworkOp (BaseNetworkOp):
-#     def __init__(self, func):
-#         super().__init__(lambda n: func(n.value, n.inputs))
-        
-
-    #def __call__(self, network : Network):
-    #    return Network(self.f(network.value), network.inputs)
-
-    #def __rshift__(self, f2):
-        #return RecursiveNetworkOp(self.f, f2)
-
-
-
-'''
-class RecursiveNetworkOp:
-    def __init__(self, f1, f2):
-        self.f1 = f1
-        self.f2 = f2
-
-    def __call__(self, network : Network):
-        return self.f2(self.f1(network))
-
-    def __rshift__(self, f2 : NetworkOp):
-        return RecursiveNetworkOp(self.f, f2)
-'''
-
-
-#def tOp(op): return lambda: TensorflowOp(op) 
-#def tL(layer, *args, **kwargs): return TensorflowOp(layer(*args, **kwargs))
-#def nOp(op): return NetworkOp(op)
 
 
 class NetworkBuild:
@@ -205,3 +160,10 @@ class ResidualNetworkBuild(ConvNetworkBuild):
                 if i != len(filter_counts)-1: x = cls.residual(fcount, cnb.conv2DUp, norm_func, activation, strides=2)(x)
             return x
         return downscale
+    
+    
+    
+    
+class RecurrentNetworkBuild(NetworkBuild):
+    def LSTM(units, *args, **kwargs):
+        return tf.keras.layers.LSTM(units, *args, **kwargs)

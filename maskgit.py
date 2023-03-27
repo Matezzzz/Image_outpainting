@@ -319,7 +319,9 @@ class MaskGIT(tf.keras.Model):
             "MaskGIT":MaskGIT, "BiasLayer":BiasLayer, "TokenEmbedding":TokenEmbedding,
             "TransformerLayer":TransformerLayer, "TransformerMLP":TransformerMLP, "TransformerAttention":TransformerAttention
         }) #type:ignore
-        
+    
+    def set_generation_temp(self, temp):
+        self.generation_temperature = temp
         
     def get_config(self):
         return super().get_config() | {

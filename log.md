@@ -43,3 +43,11 @@ Working on basic image segmentation so I can use the webcam data (I want those b
  * 102 - two transformers, maskgit logits
  * 107 - one transformer, actual decoding, maskgit logits
  * 109 - two transformers, actual decoding, maskgit logits, smaller batch size (16 out of 32)
+
+
+#27.3.
+
+* v2 ideas
+    * discriminatory loss for tokenizer (+noise?)
+    * half image training for maskgit
+    * try diffusion models?

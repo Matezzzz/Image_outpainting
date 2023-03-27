@@ -28,6 +28,8 @@ parser.add_argument("--img_size", default=128, type=int, help="Input image size"
 parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 parser.add_argument("--example_count", default=10, type=int, help="How many times to do the outpainting on a batch")
 parser.add_argument("--outpaint_range",default=5, type=int, help="How many times to outpaint in each direction")
+parser.add_argument("--generation_temp",default=1.0, type=float, help="How random should the generation be")
+
 
 parser.add_argument("--dataset_location", default=".", type=str, help="Directory to read data from")
 parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
@@ -48,6 +50,7 @@ def main(args):
 
     tokenizer = VQVAEModel.load(get_tokenizer_fname())
     maskgit = MaskGIT.load(get_maskgit_fname()) # type: ignore
+    maskgit.set_generation_temp(args.generation_temp)
 
     dataset = ImageLoading(args.dataset_location, args.img_size, args.places).create_dataset(args.batch_size)
     
