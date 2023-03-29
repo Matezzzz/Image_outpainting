@@ -1,11 +1,12 @@
 from collections.abc import Callable
+from typing import Any
 import tensorflow as tf
 
 
 class Tensor:
     tensor : tf.Tensor
     
-    def __init__(self, tensor : tf.Tensor):
+    def __init__(self, tensor : tf.Tensor | Any):
         self.tensor = tensor
 
     def __rshift__(self, op) -> "Tensor":
@@ -28,7 +29,7 @@ class Tensor:
         return self.tensor
     
     def __getitem__(self, *args):
-        return Tensor(self.tensor.__getitem__(*args))
+        return Tensor(self.tensor.__getitem__(*args)) # type: ignore
 
 
 
@@ -36,7 +37,7 @@ class Tensor:
 class NetworkBuild:
     inp = lambda shape, *args, **kwargs: tf.keras.layers.Input(shape, *args, **kwargs)
     @classmethod
-    def inpT(cls, shape, *args, **kwargs): return Tensor(cls.inp(shape, *args, **kwargs))
+    def inpT(cls, shape, *args, **kwargs): return Tensor(cls.inp(shape, *args, **kwargs)) # type: ignore
 
 
     @classmethod
@@ -68,9 +69,9 @@ class NetworkBuild:
     def reshape(new_shape): return lambda x: tf.reshape(x, new_shape)
 
     
-    batchnorm = tf.keras.layers.BatchNormalization
+    batchNorm = tf.keras.layers.BatchNormalization
     layerNorm = tf.keras.layers.LayerNormalization
-    groupnorm = lambda: tf.keras.layers.GroupNormalization(groups=16) # tfa.layers.GroupNormalization(groups=16)
+    groupNorm = lambda: tf.keras.layers.GroupNormalization(groups=16) # tfa.layers.GroupNormalization(groups=16)
 
     @staticmethod
     def dropout(rate): return tf.keras.layers.Dropout(rate)
@@ -112,8 +113,8 @@ cnb = ConvNetworkBuild
 
 class ResidualNetworkBuild(ConvNetworkBuild):
     @staticmethod
-    def residualMainLink(filters, conv_func = cnb.conv2D, norm_func: Callable = nb.batchnorm, activation: Callable=nb.relu, strides = 1):
-        def residual(x):
+    def residualMainLink(filters, conv_func = cnb.conv2D, norm_func: Callable = nb.batchNorm, activation: Callable=nb.relu, strides = 1):
+        def residual(x : tf.Tensor):
             out = Tensor(conv_func(filters, use_bias=False, strides=strides)(x))\
                 >> norm_func()\
                 >> activation\
@@ -124,18 +125,18 @@ class ResidualNetworkBuild(ConvNetworkBuild):
                 
 
     @classmethod
-    def residual(cls, filters, conv_func = cnb.conv2D, norm_func : Callable=nb.batchnorm, activation: Callable=nb.relu, strides=1):
+    def residual(cls, filters, conv_func = cnb.conv2D, norm_func : Callable=nb.batchNorm, activation: Callable=nb.relu, strides=1):
         def residual_(x):
             a = cls.residualMainLink(filters, conv_func, norm_func, activation, strides)(x)
             b = (x if filters == x.shape[-1] else conv_func(filters, kernel_size=1)(x)) if strides == 1 else conv_func(filters, strides=strides)(x)
-            return a+b
+            return a+b # type: ignore
         return residual_
 
     
 
 
     @classmethod
-    def residualSequence(cls, blocks, filters, norm_func : Callable =nb.batchnorm, activation: Callable=nb.relu):
+    def residualSequence(cls, blocks, filters, norm_func : Callable =nb.batchNorm, activation: Callable=nb.relu):
         def sequence(x):
             for _ in range(blocks):
                 x = cls.residual(filters, cnb.conv2D, norm_func, activation)(x)
@@ -144,7 +145,7 @@ class ResidualNetworkBuild(ConvNetworkBuild):
 
 
     @classmethod
-    def residualDownscaleSequence(cls, filter_counts, num_blocks, norm_func : Callable = nb.batchnorm, activation: Callable=nb.relu):
+    def residualDownscaleSequence(cls, filter_counts, num_blocks, norm_func : Callable = nb.batchNorm, activation: Callable=nb.relu):
         def downscale(x):
             for i, fcount in enumerate(filter_counts):
                 x = cls.residualSequence(num_blocks, fcount, norm_func, activation)(x)
@@ -153,7 +154,7 @@ class ResidualNetworkBuild(ConvNetworkBuild):
         return downscale
 
     @classmethod
-    def residualUpscaleSequence(cls, filter_counts, num_blocks, norm_func : Callable = nb.batchnorm, activation: Callable=nb.relu):
+    def residualUpscaleSequence(cls, filter_counts, num_blocks, norm_func : Callable = nb.batchNorm, activation: Callable=nb.relu):
         def downscale(x):
             for i, fcount in enumerate(reversed(filter_counts)):
                 x = cls.residualSequence(num_blocks, fcount, norm_func, activation)(x)
@@ -165,5 +166,6 @@ class ResidualNetworkBuild(ConvNetworkBuild):
     
     
 class RecurrentNetworkBuild(NetworkBuild):
+    @staticmethod
     def LSTM(units, *args, **kwargs):
         return tf.keras.layers.LSTM(units, *args, **kwargs)

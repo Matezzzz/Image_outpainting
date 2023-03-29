@@ -51,3 +51,11 @@ Working on basic image segmentation so I can use the webcam data (I want those b
     * discriminatory loss for tokenizer (+noise?)
     * half image training for maskgit
     * try diffusion models?
+
+#28.3.
+ * started using batch norm instead of group norm to lower memory consumption (and went back because )
+ 
+
+#29.3.
+ * sparse top k accuracy is too high -> suspicious. Might have only a few vectors that are used a lot! Would explain the slow tokenizer training
+ * revert to group norm
