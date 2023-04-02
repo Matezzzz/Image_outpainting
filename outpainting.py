@@ -28,8 +28,10 @@ parser.add_argument("--img_size", default=128, type=int, help="Input image size"
 parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 parser.add_argument("--example_count", default=10, type=int, help="How many times to do the outpainting on a batch")
 parser.add_argument("--outpaint_range",default=2, type=int, help="How many times to outpaint in each direction")
-parser.add_argument("--generation_temp",default=.5, type=float, help="How random should the generation be")
+parser.add_argument("--generation_temp",default=.5, type=float, help="How random should the generation be. Not used for simple decoding.")
 parser.add_argument("--samples", default=4, type=int, help="Rendering samples")
+parser.add_argument("--decoding",default="simple", type=str, help="What decoding method to use, simple/full")
+
 
 parser.add_argument("--dataset_location", default=".", type=str, help="Directory to read data from")
 parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
@@ -121,7 +123,13 @@ def main(args):
                 #print ("#", flush=True)
                 
             f, t = pred_pos-op_step, pred_pos+op_step
-            new_tokens = maskgit.decode(tokens[:, f[0]:t[0], f[1]:t[1]], False)[0]
+            inp = tokens[:, f[0]:t[0], f[1]:t[1]]
+            if args.decoding == "simple":
+                new_tokens = maskgit.decode_simple(inp, False)[0]
+            elif args.decoding == "full":  
+                new_tokens = maskgit.decode(inp, False)[0]
+            else:
+                raise NotImplementedError()
             tokens[:, f[0]:t[0], f[1]:t[1]] = np.where(tokens[:, f[0]:t[0], f[1]:t[1]] == MASK_TOKEN, new_tokens, tokens[:, f[0]:t[0], f[1]:t[1]])
             #print (f"{current_step+1}/{total_steps} done.")
             #current_step += 1

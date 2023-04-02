@@ -224,6 +224,7 @@ class MaskGIT(tf.keras.Model):
         self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer.parser.parse_args([]))
         self._tokenizer.trainable = False
         self._tokenizer.build([None, 128, 128, 3])
+        tf.keras.utils.plot_model(self._tokenizer, "model.jpg")
         
         
         self.codebook_size = self._tokenizer.codebook_size
@@ -336,7 +337,12 @@ class MaskGIT(tf.keras.Model):
         self._transformer_model.optimizer.minimize(
             loss, self._transformer_model.trainable_variables, tape
         )
-        return {'loss':loss} | self._transformer_model.compute_metrics(train_tokens, tokens, logits, sample_weight)
+        return {'loss':loss, 'learning_rate':self._trainsformer_model.optimizer.learning_rate} | self._transformer_model.compute_metrics(train_tokens, tokens, logits, sample_weight)
+    
+    # def pretrain(self):
+    #     self._transformer_model.compile(
+    #         tf.optimizers.Adam(tf.optimizers.schedules.PolynomialDecay(1e-4, ))
+    #     )
     
     @property
     def downscale_multiplier(self):
@@ -426,10 +432,7 @@ def main(args):
     #     #mask = tf.random.uniform(tf.shape(tokens)) < tf.random.uniform([tf.shape(tokens)[0], 1, 1])
     #     return tf.where(mask, tf.cast(MASK_TOKEN, tf.int32), tokens), tokens, tf.where(mask, 1.0, 0.0)
     
-    image_load = ImageLoading(args.dataset_location, args.img_size, args.places)#, dataset_augmentation_batched=prepare_dataset)
-    
-    train_dataset = image_load.create_dataset(args.batch_size)
-    val_dataset = image_load.create_dataset(8)
+
     
     
     if not args.load_model:
@@ -437,15 +440,26 @@ def main(args):
     else:
         model = MaskGIT.load(get_maskgit_fname())
     
+    image_load = ImageLoading(args.dataset_location, args.img_size, args.places)#, dataset_augmentation_batched=prepare_dataset)
+    
+    train_dataset = image_load.create_dataset(args.batch_size)
+    val_dataset = image_load.create_dataset(8)
+    
+    
     wandb_manager = log_and_save.WandbManager("image_outpainting_maskgit")
     wandb_manager.start(args)
     model_log = ModelLog(model, val_dataset)
 
-    model.fit(train_dataset, epochs=args.epochs, callbacks=[ #type: ignore
+
+    callbacks = [ #type: ignore
         WandbModelCheckpoint(get_maskgit_fname(), "loss", save_freq=10000),
         tf.keras.callbacks.LambdaCallback(on_batch_end=model_log.log),
-        WandbMetricsLogger(25)]
-    )
+        WandbMetricsLogger(25)
+    ]
+    #model.pretraining()
+    #model.fit(train_dataset, epochs=1, callbacks=callbacks)
+    #model.normal_train()
+    model.fit(train_dataset, epochs=args.epochs, callbacks=callbacks, initial_epoch=1)
     
     
 if __name__ == "__main__":

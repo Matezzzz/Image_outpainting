@@ -59,3 +59,10 @@ Working on basic image segmentation so I can use the webcam data (I want those b
 #29.3.
  * sparse top k accuracy is too high -> suspicious. Might have only a few vectors that are used a lot! Would explain the slow tokenizer training
  * revert to group norm
+
+
+
+#2.4.
+
+trying to improve images - add details
+ * diffusion models - is good at generation, but hard to use for adding details

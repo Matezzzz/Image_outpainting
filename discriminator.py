@@ -9,8 +9,7 @@ class Discriminator:
                 >> nb.conv2DDown(8, activation="relu")\
                 >> nb.residualDownscaleSequence([8, 16, 32, 64, 128], residual_blocks)\
                 >> nb.conv2D(128, activation="relu")\
-                >> nb.flatten()\
-                >> nb.dense(32, activation="relu")\
+                >> nb.globalAveragePooling2D()\
                 >> nb.dense(2, activation="softmax")
             return y
         self._model = nb.create_model(nb.inpT([image_size, image_size, 3]), discriminator)

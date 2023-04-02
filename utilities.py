@@ -4,6 +4,15 @@ import wandb
 from PIL import Image
 
 
+def tf_init(use_gpu, threads, seed):
+    import tensorflow as tf
+    tf.config.set_visible_devices((tf.config.list_physical_devices("GPU")[use_gpu] if use_gpu != -1 else []), "GPU")
+
+    tf.keras.utils.set_random_seed(seed)
+    tf.config.threading.set_inter_op_parallelism_threads(threads)
+    tf.config.threading.set_intra_op_parallelism_threads(threads)
+
+
 def log_image(img):
     return wandb.Image(img)
 
@@ -35,11 +44,14 @@ def get_time_mask_fname(place, time):
 def get_mask_fname(place):
     return f"masks/{place}_mask.png"
 
-def get_tokenizer_fname():
-    return "models/tokenizer"
+def get_tokenizer_fname(run_name=None):
+    return "models/tokenizer" + ("" if run_name is None else f"_{run_name}")
 
-def get_maskgit_fname():
-    return "models/maskgit"
+def get_maskgit_fname(run_name=None):
+    return "models/maskgit" + ("" if run_name is None else f"_{run_name}")
+
+def get_sharpening_fname(run_name=None):
+    return "models/sharpen" + ("" if run_name is None else f"_{run_name}")
 
 
 # import random
