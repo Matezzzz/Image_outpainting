@@ -66,3 +66,12 @@ Working on basic image segmentation so I can use the webcam data (I want those b
 
 trying to improve images - add details
  * diffusion models - is good at generation, but hard to use for adding details
+
+
+#3.4.
+ * Try going back to sparse CCE (now using NLL)
+
+ * try discrete image space - will be useless, but might be fun
+
+
+

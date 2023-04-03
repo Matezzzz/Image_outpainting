@@ -8,12 +8,12 @@ import numpy as np
 import tensorflow as tf
 import wandb
 
-from build_network import ResidualNetworkBuild as nb, Tensor
+from build_network import NetworkBuild as nb, Tensor
 from dataset import ImageLoading
 import log_and_save
 from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
-from discriminator import Discriminator
-from utilities import get_tokenizer_fname
+from discriminator import create_discriminator
+from utilities import get_tokenizer_fname, tf_init
 
 def none_or_str(value):
     if value == 'None':
@@ -22,6 +22,7 @@ def none_or_str(value):
 
 parser = argparse.ArgumentParser()
 # These arguments will be set appropriately by ReCodEx, even if you change them.
+parser.add_argument("--use_gpu", default=0, type=int, help="Which GPU to use. -1 to run on CPU.")
 parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
 parser.add_argument("--epochs", default=10, type=int, help="Number of epochs.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
@@ -111,7 +112,8 @@ class VectorQuantizer(tf.keras.layers.Layer):
         self.add_metric(commitment_loss, "commitment_loss")
         self.add_metric(embedding_loss, "embedding_loss")
         self.add_metric(entropy_loss, "entropy_loss")
-        if training: embeddings = inputs + tf.stop_gradient(embeddings - inputs)
+        if training:
+            embeddings = inputs + tf.stop_gradient(embeddings - inputs)
         return embeddings
 
     def get_config(self):
@@ -132,10 +134,10 @@ class VectorQuantizer(tf.keras.layers.Layer):
 def create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim):
     def encoder(x):
         out = Tensor(x)\
-            >> nb.residual_downscale_sequence(filters * np.array(residual_layer_multipliers), num_res_blocks, nb.batchNorm, nb.swish)\
+            >> nb.residual_downscale_sequence(filters * np.array(residual_layer_multipliers), num_res_blocks, nb.batch_norm, nb.swish)\
             >> nb.group_norm()\
             >> nb.swish\
-            >> nb.conv2D(embedding_dim, kernel_size=1)
+            >> nb.conv_2d(embedding_dim, kernel_size=1)
         return out.get()
     return encoder
 
@@ -149,11 +151,11 @@ def create_decoder(filters, residual_layer_multipliers, num_res_blocks, embeddin
             return x
         out = Tensor(x)\
             >> add_noise_dims\
-            >> nb.conv2D(filters=embedding_dim)\
-            >> nb.residual_upscale_sequence(filters * np.array(residual_layer_multipliers[::-1]), num_res_blocks, nb.batchNorm, nb.swish)\
+            >> nb.conv_2d(filters=embedding_dim)\
+            >> nb.residual_upscale_sequence(filters * np.array(residual_layer_multipliers[::-1]), num_res_blocks, nb.batch_norm, nb.swish)\
             >> nb.group_norm()\
             >> nb.swish\
-            >> nb.conv2D(filters=3, activation="hard_sigmoid")
+            >> nb.conv_2d(filters=3, activation="hard_sigmoid")
         return out.get()
     return decoder
 
@@ -178,13 +180,13 @@ class VQVAEModel(tf.keras.Model):
         self.decoder_noise_dim = decoder_noise_dim
 
         inp_shape = [img_size, img_size, 3]
-        self._encode_model = nb.create_model(nb.inpT(inp_shape),
+        self._encode_model = nb.create_model(nb.inp(inp_shape),
                                              lambda x: x >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
 
-        self._decode_model = nb.create_model(nb.inpT(self._encode_model.output_shape[1:]),
+        self._decode_model = nb.create_model(nb.inp(self._encode_model.output_shape[1:]),
                                              lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim, decoder_noise_dim))
 
-        self._model = nb.create_model(nb.inpT(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
+        self._model = nb.create_model(nb.inp(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
 
         self.compile()
 
@@ -195,7 +197,7 @@ class VQVAEModel(tf.keras.Model):
         )
 
         if self.discriminator_loss_weight != 0:
-            self._discriminator = Discriminator(img_size, 2).get_model()
+            self._discriminator = create_discriminator(img_size, 2)
 
 
 
@@ -208,17 +210,17 @@ class VQVAEModel(tf.keras.Model):
             batch_size = tf.shape(data)[0]
             if self.discriminator_loss_weight != 0:
                 disc_out = self._discriminator(reconstruction, training=True)
-                discriminator_loss = self.discriminator_loss_weight * self._discriminator.compiled_loss(tf.ones(batch_size), disc_out) # type: ignore
+                discriminator_loss = self.discriminator_loss_weight * self._discriminator.compiled_loss(tf.ones(batch_size), disc_out)
                 metrics |= {'discriminator_loss':discriminator_loss}
             else:
                 discriminator_loss = 0
 
-            reconstruction_loss = self._model.compiled_loss(data, reconstruction) # type: ignore
-            vqvae_loss = sum(self._model.losses) # type: ignore
+            reconstruction_loss = self._model.compiled_loss(data, reconstruction)
+            vqvae_loss = sum(self._model.losses)
 
-            loss = reconstruction_loss + discriminator_loss + vqvae_loss  # type: ignore
+            loss = reconstruction_loss + discriminator_loss + vqvae_loss
             metrics |= {'main_loss':loss, 'reconstruction_loss': reconstruction_loss, 'vqvae_loss':vqvae_loss, 'learning_rate':self._model.optimizer.learning_rate}
-            self._model.compiled_metrics.update_state(data, reconstruction) # type: ignore
+            self._model.compiled_metrics.update_state(data, reconstruction)
             metrics |= {m.name:m.result() for m in self._model.metrics}
 
         self._model.optimizer.minimize(loss, self._model.trainable_variables, tape)
@@ -230,9 +232,9 @@ class VQVAEModel(tf.keras.Model):
 
                 disc_predictions = self._discriminator(disc_input, training=True)
 
-                disc_loss = self._discriminator.compiled_loss(disc_labels, disc_predictions) # type: ignore
+                disc_loss = self._discriminator.compiled_loss(disc_labels, disc_predictions)
             self._discriminator.optimizer.minimize(disc_loss, self._discriminator.trainable_variables, tape)
-            self._discriminator.compiled_metrics.update_state(disc_labels, disc_predictions)# type: ignore
+            self._discriminator.compiled_metrics.update_state(disc_labels, disc_predictions)
             metrics |= {'D_discriminator_loss': disc_loss} | {("D_"+m.name):m.result() for m in self._discriminator.metrics}
         return metrics
 
@@ -254,7 +256,7 @@ class VQVAEModel(tf.keras.Model):
         def vqvae_load_old(*args2, **kwargs):
             return VQVAEModel(*args2, **kwargs, decoder_noise_dim=args.decoder_noise_dim)
 
-        vqvae_old = tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss, "Discriminator":Discriminator}) #VQVAEModel.__new__(VQVAEModel)
+        vqvae_old = tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss}) #VQVAEModel.__new__(VQVAEModel)
         vqvae = VQVAEModel.new(args)
         vqvae.set_weights(vqvae_old.get_weights()) # type: ignore
         #vqvae = VQVAEModel(vqvae_old.img_size, vqvae_old.filters, vqvae_old.residual_layer_multipliers, vqvae_old.num_res_blocks, vqvae_old.embedding_dim, vqvae_old.codebook_size, )
@@ -280,8 +282,8 @@ class VQVAEModel(tf.keras.Model):
 
     @property
     def downscale_multiplier(self):
-        a, b = self._encode_model.input_shape[1:3], self.latent_space_size
-        return  a[0]//b[0], a[1]//b[1] 
+        img_size, token_size = self._encode_model.input_shape[1:3], self.latent_space_size
+        return img_size[0]//token_size[0], img_size[1]//token_size[1]
 
     def encode(self, image, training=False):
         return self._quantizer.get_tokens(self._quantizer.get_distances(self._encode_model(image, training)))
@@ -303,11 +305,7 @@ class VQVAEModel(tf.keras.Model):
 
 
 def main(args):
-    tf.config.set_visible_devices((tf.config.get_visible_devices("GPU")[args.use_gpu] if args.use_gpu != -1 else []), "GPU")
-
-    tf.keras.utils.set_random_seed(args.seed)
-    tf.config.threading.set_inter_op_parallelism_threads(args.threads)
-    tf.config.threading.set_intra_op_parallelism_threads(args.threads)
+    tf_init(args.use_gpu, args.threads, args.seed)
 
 
 
@@ -364,8 +362,8 @@ def main(args):
     wandb_manager.start(args)
     model_log = ModelLog(model, val_dataset)
 
-    model.fit(train_dataset, epochs=args.epochs, callbacks=[ #type: ignore
-        WandbModelCheckpoint(get_tokenizer_fname(), "reconstruction_loss", save_freq=2500),
+    model.fit(train_dataset, epochs=args.epochs, callbacks=[
+        WandbModelCheckpoint(get_tokenizer_fname(wandb.run.name), "reconstruction_loss", save_freq=2500), #type: ignore
         model_log,
         WandbMetricsLogger(50)]
     )

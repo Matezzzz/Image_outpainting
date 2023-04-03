@@ -1,12 +1,18 @@
 import glob
-import numpy as np
-import wandb
-from PIL import Image
 
+import numpy as np
+from PIL import Image
+import tensorflow as tf
+
+import wandb
+
+#os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 
 def tf_init(use_gpu, threads, seed):
-    import tensorflow as tf
-    tf.config.set_visible_devices((tf.config.list_physical_devices("GPU")[use_gpu] if use_gpu != -1 else []), "GPU")
+    gpus = tf.config.list_physical_devices("GPU")
+    assert len(gpus) > use_gpu, "The requested GPU was not found"
+
+    tf.config.set_visible_devices((gpus[use_gpu] if use_gpu != -1 else []), "GPU")
 
     tf.keras.utils.set_random_seed(seed)
     tf.config.threading.set_inter_op_parallelism_threads(threads)
@@ -58,7 +64,7 @@ def get_sharpening_fname(run_name=None):
 # a = glob.glob("brno/*/*.jpg")
 # random.shuffle(a)
 # print(np.var([np.asarray(Image.open(f))/255.0 for f in a[:100]]))
-    
+
 
 #logger = log_and_save.WandbManager("image_outpainting")
 #logger.start({})
@@ -70,8 +76,3 @@ def get_sharpening_fname(run_name=None):
 # save_image(mask, "final_mask.png")
 # for img in islice(load_images("brno", "20210312"), 0, 281, 40):
 #     wandb.log({"final_mask":log_segmentation(img, mask)})
-
-
-
-
-        

@@ -3,12 +3,13 @@ import argparse
 
 
 import tensorflow as tf
+import numpy as np
 import wandb
 from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
 
 from tokenizer import VQVAEModel, parser as tokenizer_args_parser
-from utilities import get_tokenizer_fname, get_sharpening_fname
-from build_network import ResidualNetworkBuild as nb
+from utilities import get_tokenizer_fname, get_sharpening_fname, tf_init
+from build_network import NetworkBuild as nb
 from log_and_save import WandbManager
 from dataset import ImageLoading
 
@@ -66,12 +67,16 @@ def sinusoidal_embedding(img_size, embedding_dims):
     return apply
 
 
-
+IMAGE_MEAN = np.array([0.585, 0.668, 0.743], np.float32)
+IMAGE_VARIANCE = np.array([0.03283161, 0.01849923, 0.01569985], np.float32)
+EDGE_MEAN = np.array([0.00133469, -0.00280882, 0.00119304], np.float32)
+EDGE_VARIANCE = np.array([4.6448597e-05, 3.2885295e-05, 3.9158600e-05], np.float32)
 
 # Code greatly inspired by https://keras.io/examples/generative/ddim/
 class DiffusionModel(tf.keras.Model):
     def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, learning_rate, weight_decay):
         super().__init__()
+        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer_args_parser.parse_args([]))
 
         self.img_size=img_size
         self.block_filter_counts = block_filter_counts
@@ -80,15 +85,11 @@ class DiffusionModel(tf.keras.Model):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
-        def create_diffusion_model(noisy_img, noise_variance):
-            inp = nb.concat([noisy_img, noise_variance >> sinusoidal_embedding(img_size, noise_embed_dim)], -1) # type: ignore
-            return inp >> nb.u_net(block_filter_counts, block_count) >> nb.conv2D(3, kernel_size=1)
-            #return\
-            #    >> nb.residualSequence(block_count, filter_count)\
-            #    >> nb.conv2D(3, kernel_size=1)
+        def create_diffusion_model(blurry_img, noisy_edges, noise_variance):
+            inp = nb.concat([blurry_img, noisy_edges, noise_variance >> sinusoidal_embedding(img_size, noise_embed_dim)], -1) # type: ignore
+            return inp >> nb.u_net(block_filter_counts, block_count) >> nb.conv_2d(3, kernel_size=1)
 
-        self.normalizer = tf.keras.layers.Normalization()
-        self._model = nb.create_model((nb.inpT([img_size, img_size, 3]), nb.inpT([])), create_diffusion_model)
+        self._model = nb.create_model((nb.inp([img_size, img_size, 3]), nb.inp([img_size, img_size, 3]), nb.inp([])), create_diffusion_model)
         self._model.compile(
             optimizer=tf.optimizers.experimental.AdamW(learning_rate=learning_rate, weight_decay=weight_decay),
             loss=tf.losses.mean_absolute_error
@@ -98,13 +99,18 @@ class DiffusionModel(tf.keras.Model):
         self.image_loss_tracker = tf.metrics.Mean(name="image_loss")
         self.compile()
 
-    def normalize(self, images, training):
-        return self.normalizer(images, training=training)
 
-    def denormalize(self, images):
-        # convert the pixel values back to 0-1 range
-        images = self.normalizer.mean + images * self.normalizer.variance**0.5
-        return tf.clip_by_value(images, 0.0, 1.0)
+    def normalize_image(self, images):
+        return (images - IMAGE_MEAN) / tf.sqrt(IMAGE_VARIANCE)
+
+    def denormalize_image(self, images):
+        return tf.clip_by_value(images * tf.sqrt(IMAGE_VARIANCE) + IMAGE_MEAN, 0.0, 1.0)
+
+    def normalize_edges(self, edges):
+        return (edges - EDGE_MEAN) / tf.sqrt(EDGE_VARIANCE)
+
+    def denormalize_edges(self, edges):
+        return edges * tf.sqrt(EDGE_VARIANCE) + EDGE_MEAN
 
     def diffusion_schedule(self, diffusion_times) -> tuple[tf.Tensor, tf.Tensor]:
         # diffusion times -> angles
@@ -122,15 +128,19 @@ class DiffusionModel(tf.keras.Model):
 
         return noise_rates, signal_rates # type: ignore
 
-    def denoise(self, noisy_images, noise_rates, signal_rates, training) -> tuple[tf.Tensor, tf.Tensor]:
+
+    def denoise(self, blurry_image, noisy_edges, noise_rates, signal_rates, training) -> tuple[tf.Tensor, tf.Tensor]:
         model = self._model if training else self._ema_model
         # predict noise component and calculate the image component using it
-        pred_noises = model([noisy_images, noise_rates**2], training=training)
-        pred_images = (noisy_images - noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises) / signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis]
 
-        return pred_noises, pred_images # type: ignore
+        #image_with_noisy_edges = self.normalize_image(blurry_image + self.denormalize_edges(noisy_edges))
+        pred_noises = model([blurry_image, noisy_edges, noise_rates**2], training=training)
+        pred_edges = (noisy_edges - noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises) / signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis]
 
-    def reverse_diffusion(self, initial_noise, diffusion_steps, initial_noise_level=1.0):
+        return pred_noises, pred_edges # type: ignore
+
+
+    def reverse_diffusion(self, blurry_image, initial_noise, diffusion_steps):
         # reverse diffusion = sampling
         num_images = initial_noise.shape[0]
         step_size = 1.0 / diffusion_steps
@@ -138,76 +148,91 @@ class DiffusionModel(tf.keras.Model):
         # important line:
         # at the first sampling step, the "noisy image" is pure noise
         # but its signal rate is assumed to be nonzero (min_signal_rate)
-        next_noisy_images = initial_noise
-        pred_images = None
+        next_noisy_edges = initial_noise
+        pred_edges = None
         for step in range(diffusion_steps):
-            noisy_images = next_noisy_images
+            noisy_edges = next_noisy_edges
 
             # separate the current noisy image to its components
-            diffusion_times = (tf.ones([num_images]) - step * step_size) * initial_noise_level
+            diffusion_times = tf.ones([num_images]) - step * step_size
             noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
-            pred_noises, pred_images = self.denoise(noisy_images, noise_rates, signal_rates, training=False)
+            pred_noises, pred_edges = self.denoise(blurry_image, noisy_edges, noise_rates, signal_rates, training=False)
 
             # remix the predicted components using the next signal and noise rates
-            next_diffusion_times = diffusion_times - step_size * initial_noise_level
+            next_diffusion_times = diffusion_times - step_size
             next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
-            next_noisy_images = next_signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_images + next_noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises # type: ignore
+            next_noisy_edges = next_signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_edges + next_noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises # type: ignore
             # this new noisy image will be used in the next step
-        return pred_images
-    
-    def improve_images(self, images, initial_noise_level, diffusion_steps):
-        initial_noise = tf.random.normal(shape=tf.shape(images))
-        inp = self.normalize(images, False)
-        fixed_images = self.reverse_diffusion(initial_noise * initial_noise_level + (1 - initial_noise_level) * inp, diffusion_steps, initial_noise_level)
-        return self.denormalize(fixed_images)
+        return pred_edges
 
-    def generate(self, num_images, diffusion_steps) -> tf.Tensor:
-        # noise -> images -> denormalized images
-        initial_noise = tf.random.normal(shape=(num_images, self.img_size, self.img_size, 3))
-        generated_images = self.reverse_diffusion(initial_noise, diffusion_steps)
-        generated_images = self.denormalize(generated_images)
-        return generated_images # type: ignore
+    def improve_images(self, blurry_images, diffusion_steps):
+        initial_noise = tf.random.normal(shape=tf.shape(blurry_images))
+        blurry_images_norm = self.normalize_image(blurry_images)
+        fixed_images = self.reverse_diffusion(blurry_images_norm, initial_noise, diffusion_steps)
+
+        return tf.clip_by_value(blurry_images + self.denormalize_edges(fixed_images), 0.0, 1.0)
+
+    def improve_images_test(self, ideal_images, diffusion_steps):
+        blurry_images = self._tokenizer(ideal_images)
+        return blurry_images, self.improve_images(blurry_images, diffusion_steps)
+
+
+    # def generate(self, num_images, diffusion_steps) -> tf.Tensor:
+    #     # noise -> images -> denormalized images
+    #     initial_noise = tf.random.normal(shape=(num_images, self.img_size, self.img_size, 3))
+    #     generated_images = self.reverse_diffusion(initial_noise, diffusion_steps)
+    #     generated_images = self.denormalize(generated_images)
+    #     return generated_images # type: ignore
 
     def call(self, inputs, training=None, mask=None):
-        batch_size = tf.shape(inputs)[0]
+        ideal_image = inputs
+        blurry_image = self._tokenizer(ideal_image)
+
+        batch_size = tf.shape(blurry_image)[0]
         # normalize images to have standard deviation of 1, like the noises
         #[batch, w, h, 3]
-        images = self.normalize(inputs, training=training) # type: ignore
+        edges = self.normalize_edges(ideal_image-blurry_image)
+
+        blurry_image_normed = self.normalize_image(blurry_image)
         #[batch, w, h, 3]
         noises = tf.random.normal(shape=(batch_size, self.img_size, self.img_size, 3))
 
         # sample uniform random diffusion times
         # [batch]
-        diffusion_times = tf.random.uniform([batch_size], minval=0.0, maxval=1.0) # type: ignore
+        diffusion_times = tf.random.uniform([batch_size], minval=0.0, maxval=1.0)
         #[batch], [batch]
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
         # mix the images with noises accordingly
-        noisy_images = signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * images + noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * noises # type: ignore
+        noisy_edges = signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * edges + noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * noises
 
+        #image_with_edges = self.normalize_image(blurry_image
         # train the network to separate noisy images to their components
-        pred_noises, pred_images = self.denoise(noisy_images, noise_rates, signal_rates, training=training)
+        pred_noises, pred_edges = self.denoise(blurry_image_normed, noisy_edges, noise_rates, signal_rates, training=training)
 
-        noise_loss = self._model.compiled_loss(noises, pred_noises)  # type: ignore
-        image_loss = self._model.compiled_loss(images, pred_images)  # type: ignore
-        
+        noise_loss = self._model.compiled_loss(noises, pred_noises)
+        image_loss = self._model.compiled_loss(edges, pred_edges)
+
         for weight, ema_weight in zip(self._model.weights, self._ema_model.weights):
             ema_weight.assign(0.999 * ema_weight + (1 - 0.999) * weight)
 
-        return pred_noises, pred_images, noise_loss, image_loss
+        return pred_noises, pred_edges, noise_loss, image_loss
 
     def train_step(self, data):
+        ideal_image = data
+        #train myself to be able to predict the difference between data and reconstruction
         with tf.GradientTape() as tape:
-            _, _, noise_loss, image_loss = self(data, training=True) #type: ignore
-
+            _, _, noise_loss, image_loss = self(ideal_image, training=True)
+        self._model.optimizer.minimize(noise_loss, self._model.trainable_variables, tape)
+        # pylint: disable=not-callable
         self.noise_loss_tracker.update_state(noise_loss)
         self.image_loss_tracker.update_state(image_loss)
-
-        self._model.optimizer.minimize(noise_loss, self._model.trainable_variables, tape)
         return {"noise_loss":self.noise_loss_tracker.result(), "image_loss":self.image_loss_tracker.result()}
+        # pylint: enable=not-callable
 
     def test_step(self, data):
-        _, _, noise_loss, image_loss = self(data, training=False) #type: ignore
+        ideal_image = data
+        _, _, noise_loss, image_loss = self(ideal_image, training=False)
         return {"test_noise_loss":noise_loss, "test_image_loss":image_loss}
 
     @staticmethod
@@ -229,14 +254,17 @@ class DiffusionModel(tf.keras.Model):
 
 
 def main(args):
-    tf.config.set_visible_devices((tf.config.get_visible_devices("GPU")[args.use_gpu] if args.use_gpu != -1 else []), "GPU")
+    tf_init(args.use_gpu, args.threads, args.seed)
+    # tf.config.set_visible_devices((tf.config.get_visible_devices("GPU")[args.use_gpu] if args.use_gpu != -1 else []), "GPU")
 
-    tf.keras.utils.set_random_seed(args.seed)
-    tf.config.threading.set_inter_op_parallelism_threads(args.threads)
-    tf.config.threading.set_intra_op_parallelism_threads(args.threads)
+    # tf.keras.utils.set_random_seed(args.seed)
+    # tf.config.threading.set_inter_op_parallelism_threads(args.threads)
+    # tf.config.threading.set_intra_op_parallelism_threads(args.threads)
 
     # create and compile the model
     model = DiffusionModel.new(args)
+
+
 
 
     image_loading = ImageLoading(args.dataset_location, args.img_size, args.places)
@@ -244,6 +272,33 @@ def main(args):
     train_dataset, dev_dataset = image_loading.create_train_dev_datasets(1000, args.batch_size)
     sharpen_dataset = image_loading.create_dataset(10)
 
+    #def a(x):
+    #    return tf.reduce_sum(tf.reduce_mean(x, (1, 2)), 0)
+    # img_mean, edge_mean = 0, 0
+    # n = 0
+    # for i, d in enumerate(iter(train_dataset)):
+    #     #[batch, w, h, c]
+    #     out = model._tokenizer(d)
+    #     img_mean += a(d)
+    #     edge_mean += a(d-out)
+    #     n += len(d)
+    #     if i % 100 == 0:
+    #         print(i)
+    #         print (img_mean/n)
+    #         print(edge_mean/n)
+
+    # img_variance, edge_variance = 0, 0
+    # n = 0
+    # for i, d in enumerate(iter(train_dataset)):
+    #     #[batch, w, h, c]
+    #     out = model._tokenizer(d)
+    #     img_variance += a(tf.square(d-IMAGE_MEAN))
+    #     edge_variance += a(tf.square((d-out)-EDGE_MEAN))
+    #     n += len(d)
+    #     if i % 100 == 0:
+    #         print(i)
+    #         print (img_variance/(n-1))
+    #         print(edge_variance/(n-1))
 
     class ModelLog(tf.keras.callbacks.Callback):
         def __init__(self, model : DiffusionModel, dev_dataset, sharpen_dataset):
@@ -251,33 +306,35 @@ def main(args):
             self._model = model
             self._dev_dataset = dev_dataset
             self._sharpen_dataset = iter(sharpen_dataset.repeat(None))
-            self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer_args_parser.parse_args([]))
+
 
         def on_batch_end(self, batch, logs=None):
             if batch % 400 == 0:
-                inputs = next(self._sharpen_dataset)
-                outputs = self._tokenizer(inputs)
-                sharpened_10 = self._model.improve_images(outputs, initial_noise_level=0.1, diffusion_steps=20)
-                sharpened_25 = self._model.improve_images(outputs, initial_noise_level=0.25,diffusion_steps=20)
-                sharpened_50 = self._model.improve_images(outputs, initial_noise_level=0.5, diffusion_steps=20)
-                generated = self._model.generate(num_images=8, diffusion_steps=20)
+                ideal_images = next(self._sharpen_dataset)
+                #outputs = self._tokenizer(inputs)
+                blurry_images, sharpened = self._model.improve_images_test(ideal_images, diffusion_steps=20)
+                #sharpened_25 = self._model.improve_images(outputs, initial_noise_level=0.25,diffusion_steps=20)
+                #sharpened_50 = self._model.improve_images(outputs, initial_noise_level=0.5, diffusion_steps=20)
+                #generated = self._model.generate(num_images=8, diffusion_steps=20)
 
                 wandb.log({
-                    "images":[wandb.Image(i) for i in inputs],
-                    "tokenizer_outputs":[wandb.Image(i) for i in outputs], # type: ignore
-                    "sharpened_10":[wandb.Image(i) for i in sharpened_10],
-                    "sharpened_25":[wandb.Image(i) for i in sharpened_25],
-                    "sharpened_50":[wandb.Image(i) for i in sharpened_50],
-                    "generated":[wandb.Image(i) for i in generated]}, commit=False)
+                    "images":[wandb.Image(i) for i in ideal_images],
+                    "tokenizer_outputs":[wandb.Image(i) for i in blurry_images], # type: ignore
+                    "sharpened":[wandb.Image(i) for i in sharpened] # type: ignore
+                    #"sharpened_25":[wandb.Image(i) for i in sharpened_25],
+                    #"sharpened_50":[wandb.Image(i) for i in sharpened_50],
+                    #"generated":[wandb.Image(i) for i in generated]
+                }, commit=False)
                 if logs is None:
                     logs = {}
                 val_logs = self._model.evaluate(self._dev_dataset, return_dict=True, verbose=0) # type: ignore
                 return logs | {("val_"+name):val for name, val in val_logs.items()} # type: ignore
             return super().on_batch_end(batch, logs)
 
+
     WandbManager("image_outpainting_sharpen").start(args)
     # calculate mean and variance of training dataset for normalization
-    model.normalizer.adapt(train_dataset.take(200))
+    #model.normalizer.adapt(train_dataset.take(200))
 
 
     # run training and plot generated images periodically
@@ -287,7 +344,7 @@ def main(args):
         callbacks=[
             WandbModelCheckpoint(filepath=get_sharpening_fname(wandb.run.name), monitor="val_image_loss"), #type: ignore
             ModelLog(model, dev_dataset, sharpen_dataset),
-            WandbMetricsLogger(25)
+            WandbMetricsLogger(25) # type: ignore
     ])
 
 if __name__ == "__main__":
