@@ -57,6 +57,12 @@ class NetworkBuild:
     def concat(nb_tensors, axis):
         return Tensor(tf.concat([t.get() for t in nb_tensors], axis))
 
+    @classmethod
+    def append(cls, tensor, axis):
+        def apply(x):
+            return tf.concat([x, tensor.get()], axis)
+        return apply
+
     #dense = lambda u, act = None: TensorflowOp(tf.keras.layers.Dense(u, activation=act))
 
     # @staticmethod

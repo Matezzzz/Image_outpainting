@@ -74,4 +74,4 @@ trying to improve images - add details
  * try discrete image space - will be useless, but might be fun
 
 
-
+ * Fix maskgit (validation error, whoops)!!!

@@ -3,11 +3,10 @@ import argparse
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-import wandb
-from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
+from wandb.keras import WandbModelCheckpoint
 
 
-import log_and_save
+from log_and_save import WandbManager, TrainingLog
 from dataset import ImageLoading
 import tokenizer
 from tokenizer import VQVAEModel
@@ -133,6 +132,7 @@ class TokenEmbedding(tf.keras.layers.Layer):
         mask = inputs==MASK_TOKEN
         return tf.where(mask[:, :, tf.newaxis], 0.0, self.get_embedding(tf.where(mask, 0, inputs)))
 
+
 class BiasLayer(tf.keras.layers.Layer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -153,9 +153,8 @@ def create_maskgit(codebook_size, hidden_size, position_count, intermediate_size
         #def transformer_layer(): return TransformerLayer(hidden_size, intermediate_size, transformer_heads)
         embed = embed_layer(tokens) + nb.embed(position_count, hidden_size)(tf.range(position_count)) # type: ignore
         x = Tensor(embed) >> nb.layer_norm() >> nb.dropout(0.1)
-        #x = TransformerLayer(hidden_size, intermediate_size, transformer_heads)(tranformer_inp.get())
         for _ in range(transformer_layers):
-            x = x >> nb.transformer_layer(hidden_size, intermediate_size, transformer_heads) #TransformerLayer(hidden_size, intermediate_size, transformer_heads)(x)
+            x = x >> nb.transformer_layer(hidden_size, intermediate_size, transformer_heads)
 
         out = x\
             >> nb.dense(hidden_size, activation="gelu")\
@@ -244,13 +243,13 @@ class MaskGIT(tf.keras.Model):
     #         self._transformer_model.optimizer.minimize(loss, self._transformer_model.trainable_variables, tape)
     #     return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
 
-    def test_decode(self, input_tokens):
+    def test_decode(self, input_tokens, sample=True):
         #[batch, positions]
         tokens = self.reshape_to_seq(input_tokens)
         token_logits = tf.zeros([tf.shape(input_tokens)[0], self.token_count, self.codebook_size])
         unknown_counts = tf.reduce_sum(tf.cast(tokens==MASK_TOKEN, tf.int32), -1)
         for i in range(self.decode_steps):
-            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, training=False)
+            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, training=False, sample=sample)
             tokens = tf.where(write_mask, sampled_tokens, tokens)
             token_logits = tf.where(write_mask[:, :, tf.newaxis], logits, token_logits)
         return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
@@ -262,7 +261,7 @@ class MaskGIT(tf.keras.Model):
     def mask_schedule(self, mask_ratio):
         return tf.math.cos(np.pi / 2 * mask_ratio)
 
-    def decode_step(self, tokens, initial_unknown_counts, step_i, training):
+    def decode_step(self, tokens, initial_unknown_counts, step_i, training, sample=True):
         batch_size = tf.shape(tokens)[0]
         token_count = self.token_count
         #[batch, positions, tokens]
@@ -270,10 +269,13 @@ class MaskGIT(tf.keras.Model):
         logits = self(tokens, training=training)
 
         unknown_tokens = tokens == MASK_TOKEN
-        sampled_tokens = tf.reshape(
-            tf.random.categorical(tf.reshape(logits, [batch_size * token_count, self.codebook_size]), num_samples=1, dtype=tf.int32),
-            [batch_size, token_count]
-        )
+        if sample:
+            sampled_tokens = tf.reshape(
+                tf.random.categorical(tf.reshape(logits, [batch_size * token_count, self.codebook_size]), num_samples=1, dtype=tf.int32),
+                [batch_size, token_count]
+            )
+        else:
+            sampled_tokens = tf.argmax(logits, -1, tf.int32)
 
         #gather([batch, positions, tokens], [batch, positions]) -> [batch, positions]
         selected_probs = tf.gather(tf.nn.softmax(logits, axis=-1), sampled_tokens, axis=-1, batch_dims=2)
@@ -287,7 +289,9 @@ class MaskGIT(tf.keras.Model):
         else:
             mask_len = tf.maximum(step_i+1, tf.cast(tf.floor(tf.cast(initial_unknown_counts, tf.float32) * mask_ratio), tf.int32))
 
-        confidence = tf.math.log(selected_probs) + tfp.distributions.Gumbel(0, 1).sample(tf.shape(selected_probs)) * self.generation_temperature * (1 - ratio)
+        confidence = tf.math.log(selected_probs)
+        if sample:
+            confidence += tfp.distributions.Gumbel(0, 1).sample(tf.shape(selected_probs)) * self.generation_temperature * (1 - ratio)
 
         thresholds = tf.gather(tf.sort(confidence, -1), mask_len[:, tf.newaxis], axis=-1, batch_dims=1)
 
@@ -329,10 +333,6 @@ class MaskGIT(tf.keras.Model):
 
         _, pred_logits = self.train_decode_simple(train_tokens, tokens)
 
-        #with tf.GradientTape() as tape:
-        #    logits = self(train_tokens, training=True)
-        #    loss = self._transformer_model.loss(tokens, logits, sample_weight)
-        #self._transformer_model.optimizer.minimize(loss, self._transformer_model.trainable_variables, tape)
         self._transformer_model.compiled_metrics.update_state(tokens, pred_logits, sample_weight)
 
         return {
@@ -340,10 +340,31 @@ class MaskGIT(tf.keras.Model):
             'learning_rate':self._transformer_model.optimizer.learning_rate
         } | {m.name:m.result() for m in self._transformer_model.metrics}
 
-    # def pretrain(self):
-    #     self._transformer_model.compile(
-    #         tf.optimizers.Adam(tf.optimizers.schedules.PolynomialDecay(1e-4, ))
-    #     )
+    def test_step(self, data):
+        batch_size = tf.shape(data)[0]
+
+        tokens = self._tokenizer.encode(data)
+
+        mask_idx = tf.random.uniform([batch_size], 0, tf.shape(self.train_masks)[0], tf.int32)
+        batch_masks = tf.gather(self.train_masks, mask_idx)
+        sample_weights = self.sample_weights(batch_masks)
+        _, pred_logits = self.test_decode(self.mask_tokens(tokens, batch_masks), sample=False)
+        full_loss = nll_loss(tokens, pred_logits, sample_weights)
+        full_accuracy = tf.reduce_mean(tf.metrics.sparse_categorical_accuracy(tokens, pred_logits))
+
+        mask_ratios = self.mask_schedule(tf.random.uniform([batch_size, 1, 1]))
+        batch_masks_masked = tf.logical_or(tf.random.uniform(tf.shape(tokens)) > mask_ratios, batch_masks)
+        sample_weights = self.sample_weights(batch_masks_masked)
+        _, pred_logits = self.test_decode_simple(self.mask_tokens(tokens, batch_masks_masked))
+        simple_loss = nll_loss(tokens, pred_logits, sample_weights)
+        simple_accuracy = tf.reduce_mean(tf.metrics.sparse_categorical_accuracy(tokens, pred_logits))
+
+        return {
+            "full_loss": full_loss,
+            "full_accuracy": full_accuracy,
+            "simple_loss": simple_loss,
+            "simple_accuracy": simple_accuracy
+        }
 
     @property
     def downscale_multiplier(self):
@@ -364,6 +385,14 @@ class MaskGIT(tf.keras.Model):
 
     def decode_img(self, tokens, training = False):
         return self.from_tokens(self.test_decode(tokens)[0], training)
+
+    @staticmethod
+    def mask_tokens(tokens, mask):
+        return tf.where(mask, tokens, MASK_TOKEN)
+
+    @staticmethod
+    def sample_weights(mask):
+        return tf.where(mask, 0.0, 1.0)
 
     @staticmethod
     def load(dirname) -> "MaskGIT":
@@ -395,34 +424,30 @@ class MaskGIT(tf.keras.Model):
 def main(args):
     tf_init(args.use_gpu, args.threads, args.seed)
 
-    class ModelLog(tf.keras.callbacks.Callback):
+    class MaskGITLog(TrainingLog):
+        def run_test(self, data):
+            assert isinstance(self.model, MaskGIT), "This callback can only be used with MaskGIT models"
 
-        def __init__(self, dataset):
-            super().__init__()
-            self._dataset = iter(dataset)
+            tokens_original = self.model.to_tokens(data)
 
-        def on_batch_end(self, batch, logs=None):
-            if batch % 400 == 0:
-                img = next(self._dataset)
-                assert isinstance(self.model, MaskGIT), "This callback can only be used with MaskGIT models"
+            masks = self.model.get_masks(tf.shape(data)[0])
+            tokens_masked = tf.where(masks, tokens_original, MASK_TOKEN)
 
-                tokens_original = self.model.to_tokens(img)
+            recreated = self.model.from_tokens(tokens_original)
 
-                masks = self.model.get_masks(tf.shape(img)[0])
-                tokens_masked = tf.where(masks, tokens_original, MASK_TOKEN)
+            reconstructed_simple = self.model.decode_simple_img(tokens_masked)
+            reconstructed = self.model.decode_img(tokens_masked)
+            generated = self.model.decode_img(MASK_TOKEN * tf.ones_like(tokens_original))
+            self.log.log_images("images", data).log_images("tokenizer_recreated", recreated).log_images("reconstruction_simple", reconstructed_simple)\
+                .log_images("reconstruction", reconstructed).log_images("generated_images", generated)
 
-                recreated = self.model.from_tokens(tokens_original)
-
-                reconstructed_simple = self.model.decode_simple_img(tokens_masked)
-                reconstructed = self.model.decode_img(tokens_masked)
-                generated = self.model.decode_img(MASK_TOKEN * tf.ones_like(tokens_original))
-                wandb.log({
-                    "images": [wandb.Image(d) for d in img],
-                    "tokenizer_recreated": [wandb.Image(d) for d in recreated],
-                    "reconstruction_simple": [wandb.Image(d) for d in reconstructed_simple],
-                    "reconstruction":[wandb.Image(d) for d in reconstructed],
-                    "generated_images": [wandb.Image(d) for d in generated]
-                }, commit=False)
+            # wandb.log({
+            #     "images": [wandb.Image(d) for d in img],
+            #     "tokenizer_recreated": [wandb.Image(d) for d in recreated],
+            #     "reconstruction_simple": [wandb.Image(d) for d in reconstructed_simple],
+            #     "reconstruction":[wandb.Image(d) for d in reconstructed],
+            #     "generated_images": [wandb.Image(d) for d in generated]
+            # }, commit=False)
 
 
 
@@ -448,19 +473,18 @@ def main(args):
     show_dataset = image_load.create_dataset(8)
 
 
-    log_and_save.WandbManager("image_outpainting_maskgit").start(args)
-    model_log = ModelLog(show_dataset)
+    run_name = WandbManager("image_outpainting_maskgit").start(args)
+    model_log = MaskGITLog(dev_dataset, show_dataset, 25, 400)
 
 
     callbacks = [
-        WandbModelCheckpoint(get_maskgit_fname(), "main_loss", save_freq=10000),
-        model_log,
-        WandbMetricsLogger(25)
+        WandbModelCheckpoint(get_maskgit_fname(run_name), "main_loss", save_freq=10000),
+        model_log
     ]
     #model.pretraining()
     #model.fit(train_dataset, epochs=1, callbacks=callbacks)
     #model.normal_train()
-    model.fit(train_dataset, epochs=args.epochs, callbacks=callbacks, validation_data=dev_dataset)
+    model.fit(train_dataset, epochs=args.epochs, callbacks=callbacks)
 
 
 if __name__ == "__main__":

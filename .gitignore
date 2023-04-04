@@ -1,4 +1,4 @@
-brno
+data
 masks
 maskgit-main
 wandb
@@ -6,3 +6,4 @@ __pycache__
 .vscode
 artifacts
 models
+image_variances.png
