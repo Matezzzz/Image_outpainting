@@ -34,14 +34,13 @@ class ImageLoading:
             img = Image.open(get_mask_fname(place))
         except FileNotFoundError:
             print ("Mask could not be loaded, recomputing.")
-            img = Image.fromarray(image_segmentation(load_images_place(self.dataset_location, place), place))
+            img = Image.fromarray(image_segmentation(place))
         return np.asarray(img.resize(tuple(self.image_size)))
 
 
     @staticmethod
     def load_image(fname, width, height):
         img_data = tf.io.read_file(fname)
-        #tf.image.decode_jpeg()
         img = tf.image.decode_image(img_data, 3, expand_animations=False)
         img = tf.image.resize(img, (width, height))
         img.set_shape((width, height, 3))

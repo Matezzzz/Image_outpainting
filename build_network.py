@@ -35,11 +35,16 @@ class NetworkBuild:
     def inp(cls, shape, *args, **kwargs):
         return Tensor(tf.keras.layers.Input(shape, *args, **kwargs)) # type: ignore
 
+    @staticmethod
+    def create_model_io(inp_t : Tensor | tuple, out_func : Callable[[Tensor], Tensor] | Callable):
+        inp, out_t = ([i.get() for i in inp_t], out_func(*inp_t)) if isinstance(inp_t, tuple) else (inp_t.get(), out_func(inp_t))
+        out = [o.get() for o in out_t] if isinstance(out_t, tuple) else out_t.get()
+        return inp, out
+
     @classmethod
     def create_model(cls, inp : Tensor | tuple, out_func : Callable[[Tensor], Tensor] | Callable, name=None):
-        if isinstance(inp, tuple):
-            return tf.keras.Model([i.get() for i in inp], out_func(*inp).get(), name=name)
-        return tf.keras.Model(inp.get(), out_func(inp).get(), name=name)
+        inp, out = cls.create_model_io(inp, out_func)
+        return tf.keras.Model(inp, out, name=name)
 
     @staticmethod
     def dense(*args, **kwargs):

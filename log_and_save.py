@@ -92,7 +92,7 @@ class Log:
 
 
 class TrainingLog(tf.keras.callbacks.Callback):
-    def __init__(self, dev_dataset, test_dataset, log_frequency, test_frequency, validation_frequency=None):
+    def __init__(self, dev_dataset, test_dataset, log_frequency, test_frequency, validation_frequency=None, train_batch_size = None):
         super().__init__()
         self.dev_dataset = dev_dataset
         self.test_dataset = iter(test_dataset.repeat(None))
@@ -100,29 +100,29 @@ class TrainingLog(tf.keras.callbacks.Callback):
         self.log_frequency = log_frequency
         self.test_frequency = test_frequency
         self.val_frequency = validation_frequency if validation_frequency is not None else test_frequency
-        self.batch_size = dev_dataset.element_spec.shape[0]
+        self.batch_size = dev_dataset.element_spec.shape[0] if train_batch_size is None else train_batch_size
         self.batches_processed = 0
 
     def on_batch_end(self, batch, logs=None):
-        self.batches_processed += 1
-        if batch % self.test_frequency == 0:
+        if self.batches_processed % self.test_frequency == 0:
             data = next(self.test_dataset)
             self.run_test(data)
-        if batch % self.val_frequency == 0:
-            self.run_validation()
-        if batch % self.log_frequency == 0:
+        if self.batches_processed % self.val_frequency == 0:
+            self.log.log_dict({("val_"+name):val for name, val in self.run_validation().items()})
+        if self.batches_processed % self.log_frequency == 0:
             self.log.log_value("images_processed", self.batches_processed*self.batch_size)
             if logs is not None:
                 self.log.log_dict(logs)
             self.log.commit()
+        self.batches_processed += 1
         return super().on_batch_end(batch, logs)
 
     def run_test(self, data):
         pass
 
     def run_validation(self):
-        val_logs = self.model.evaluate(self.dev_dataset, return_dict=True, verbose=0)
-        self.log.log_dict({("val_"+name):val for name, val in val_logs.items()})
+        return self.model.evaluate(self.dev_dataset, return_dict=True, verbose=0)
+        
 
 
 

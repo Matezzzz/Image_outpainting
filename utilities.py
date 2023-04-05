@@ -44,11 +44,14 @@ def load_images_place(data_dir, place, day="*"):
     for fname in glob.glob(f"{data_dir}/{place}/{day}/*.jpg"):
         yield open_image(fname)
 
+def get_mask_dir(place):
+    return f"masks/{place}"
+
 def get_time_mask_fname(place, time):
-    return f"masks/{place}/{time:04d}_mask.png"
+    return f"{get_mask_dir(place)}/{time:04d}_mask.png"
 
 def get_mask_fname(place):
-    return f"masks/{place}_mask.png"
+    return f"{get_mask_dir(place)}_mask.png"
 
 def get_tokenizer_fname(run_name=None):
     return "models/tokenizer" + ("" if run_name is None else f"_{run_name}")

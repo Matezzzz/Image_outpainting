@@ -33,7 +33,7 @@ parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight dec
 
 
 parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno", "belotin"], nargs="+", type=str, help="Individual places to use data from")
+parser.add_argument("--places", default=["brno"], nargs="+", type=str, help="Individual places to use data from")
 
 parser.add_argument("--load_model_run", default="", type=str, help="Name of the wandb run that created the model to load")
 
@@ -74,22 +74,10 @@ IMAGE_VARIANCE = np.array([0.03283161, 0.01849923, 0.01569985], np.float32)
 
 # Code greatly inspired by https://keras.io/examples/generative/ddim/
 class DiffusionModel(tf.keras.Model):
-    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, learning_rate, weight_decay):#, train_batch_size, batch_size):
-        super().__init__()
-        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer_args_parser.parse_args([]))
-
-        self.img_size=img_size
-        self.block_filter_counts = block_filter_counts
-        self.block_count = block_count
-        self.noise_embed_dim = noise_embed_dim
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        #self.train_batch_size = train_batch_size
-        #self.batch_size = batch_size
-
+    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, learning_rate, weight_decay, train_batch_size, batch_size):
         def create_diffusion_model(blurry_img, noisy_image, noise_variance):
             inp = nb.concat([blurry_img, noisy_image, noise_variance >> sinusoidal_embedding(img_size, noise_embed_dim)], -1) # type: ignore
-            return inp >> nb.u_net(block_filter_counts, block_count) >> nb.conv_2d(3, kernel_size=1)
+            return inp >> nb.u_net(block_filter_counts, block_count, nb.layer_norm) >> nb.conv_2d(3, kernel_size=1)
             # embedding = noise_variance >> sinusoidal_embedding(img_size // 4, noise_embed_dim)
             # inp = nb.concat([blurry_img, noisy_image, embedding], -1)
 
@@ -102,25 +90,36 @@ class DiffusionModel(tf.keras.Model):
             #     >> nb.residual_block(block_filter_counts[0], nb.conv_2d_up, strides=2)
             # return result_5 >> nb.append(inp, -1) >> nb.residual_block(block_filter_counts[0]) >> nb.conv_2d(3, kernel_size=1)
 
-        self._model = nb.create_model((nb.inp([img_size, img_size, 3]), nb.inp([img_size, img_size, 3]), nb.inp([])), create_diffusion_model)
+        inp, out = nb.create_model_io((nb.inp([img_size, img_size, 3]), nb.inp([img_size, img_size, 3]), nb.inp([])), create_diffusion_model)
+        super().__init__(inp, out)
 
-        #assert train_batch_size % batch_size == 0, "Train batch size must be divisible by batch size"
-        #steps_before_update = train_batch_size // batch_size
+        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer_args_parser.parse_args([]))
+        self._tokenizer.trainable = False
 
-        self._model.compile(
+        self.img_size=img_size
+        self.block_filter_counts = block_filter_counts
+        self.block_count = block_count
+        self.noise_embed_dim = noise_embed_dim
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.train_batch_size = train_batch_size
+        self.batch_size = batch_size
+
+        assert train_batch_size % batch_size == 0, "Train batch size must be divisible by batch size"
+        steps_before_update = train_batch_size // batch_size
+
+        self.compile(
             optimizer=tf.optimizers.experimental.AdamW(learning_rate=learning_rate, weight_decay=weight_decay),
             loss=tf.losses.mean_absolute_error,
-            #steps_per_execution=steps_before_update
+            steps_per_execution=steps_before_update
         )
         #self._ema_model = tf.keras.models.clone_model(self._model)
         self.noise_loss_tracker = tf.metrics.Mean(name="noise_loss")
         self.image_loss_tracker = tf.metrics.Mean(name="image_loss")
-        self.compile()
 
     def blur_images(self, images):
         tok_img_s = self._tokenizer.img_size
         return tf.image.resize(self._tokenizer(tf.image.resize(images, [tok_img_s, tok_img_s])), [self.img_size, self.img_size], tf.image.ResizeMethod.BICUBIC)
-
 
     def normalize_image(self, images):
         return (images - IMAGE_MEAN) / tf.sqrt(IMAGE_VARIANCE)
@@ -146,15 +145,17 @@ class DiffusionModel(tf.keras.Model):
 
 
     def denoise(self, blurry_image, noisy_image, noise_rates, signal_rates, training) -> tuple[tf.Tensor, tf.Tensor]:
-        model = self._model# if training else self._ema_model
+        #model = self._model# if training else self._ema_model
         # predict noise component and calculate the image component using it
 
         #image_with_noisy_edges = self.normalize_image(blurry_image + self.denormalize_edges(noisy_edges))
-        pred_noises = model([blurry_image, noisy_image, noise_rates**2], training=training)
+        pred_noises = self([blurry_image, noisy_image, noise_rates**2], training=training)
         pred_image = (noisy_image - noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises) / signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis]
 
         return pred_noises, pred_image
 
+    #def call(self, inputs, training=None, mask=None):
+    #    return self(inputs, training, mask)
 
     def reverse_diffusion(self, blurry_image, initial_noise, diffusion_steps):
         # reverse diffusion = sampling
@@ -199,7 +200,7 @@ class DiffusionModel(tf.keras.Model):
     #     generated_images = self.denormalize(generated_images)
     #     return generated_images # type: ignore
 
-    def call(self, inputs, training=None, mask=None):
+    def denoise_at_random_step(self, inputs, training):
         ideal_image = inputs
         blurry_image = self.blur_images(ideal_image)
 
@@ -226,8 +227,8 @@ class DiffusionModel(tf.keras.Model):
         # train the network to separate noisy images to their components
         pred_noises, pred_images = self.denoise(blurry_image_normed, noisy_images, noise_rates, signal_rates, training=training)
 
-        noise_loss = self._model.compiled_loss(noises, pred_noises)
-        image_loss = self._model.compiled_loss(ideal_image_normed, pred_images)
+        noise_loss = self.compiled_loss(noises, pred_noises)
+        image_loss = self.compiled_loss(ideal_image_normed, pred_images)
 
         #for weight, ema_weight in zip(self._model.weights, self._ema_model.weights):
         #    ema_weight.assign(0.999 * ema_weight + (1 - 0.999) * weight)
@@ -238,8 +239,8 @@ class DiffusionModel(tf.keras.Model):
         ideal_image = data
         #train myself to be able to predict the difference between data and reconstruction
         with tf.GradientTape() as tape:
-            _, _, noise_loss, image_loss = self(ideal_image, training=True)
-        self._model.optimizer.minimize(noise_loss, self._model.trainable_variables, tape)
+            _, _, noise_loss, image_loss = self.denoise_at_random_step(ideal_image, training=True)
+        self.optimizer.minimize(noise_loss, self.trainable_variables, tape)
         # pylint: disable=not-callable
         self.noise_loss_tracker.update_state(noise_loss)
         self.image_loss_tracker.update_state(image_loss)
@@ -248,12 +249,12 @@ class DiffusionModel(tf.keras.Model):
 
     def test_step(self, data):
         ideal_image = data
-        _, _, noise_loss, image_loss = self(ideal_image, training=False)
+        _, _, noise_loss, image_loss = self.denoise_at_random_step(ideal_image, training=False)
         return {"test_noise_loss":noise_loss, "test_image_loss":image_loss}
 
     @staticmethod
     def new(args):
-        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.learning_rate, args.weight_decay)
+        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.learning_rate, args.weight_decay, args.train_batch_size, args.batch_size)
 
     def get_config(self):
         return super().get_config() | {
@@ -278,7 +279,7 @@ def main(args):
     image_loading = ImageLoading(args.dataset_location, args.img_size, args.places, scale_down=1, shuffle_buffer=128)
 
     train_dataset, dev_dataset = image_loading.create_train_dev_datasets(1000, args.batch_size)
-    sharpen_dataset = image_loading.create_dataset(10)
+    sharpen_dataset = image_loading.create_dataset(4)
     #plot_image_variances(train_dataset)
 
 
@@ -289,21 +290,31 @@ def main(args):
 
             blurry_images, sharpened = self.model.improve_images_test(data, diffusion_steps=200)
             self.log.log_images("images", data).log_images("tokenizer_outputs", blurry_images).log_images("sharpened", sharpened)
+            
+        def run_validation(self):
+            return self.model.evaluate(self.dev_dataset, return_dict=True, verbose=0, steps=1000 // args.train_batch_size)
 
 
     WandbManager("image_outpainting_sharpen").start(args)
     # calculate mean and variance of training dataset for normalization
     #model.normalizer.adapt(train_dataset.take(200))
 
-
+    #dataset of size 207730, 10 boxes, half is discarded, divide by batch size
+    #APPROX_DATASET_SIZE = (207730 * 10 * 0.5 // args.batch_size) // 8 * 8
+    
+    step = args.train_batch_size // args.batch_size
+    
+    #12235 batches of size 64 (found out during another run). round down to the nearest multiple of step
+    APPROX_DATASET_SIZE = (12235 * 64 // args.batch_size) // step * step
+    
     # run training and plot generated images periodically
     model.fit(
-        train_dataset,
+        train_dataset.repeat(),
         epochs=args.epochs,
         callbacks=[
-            WandbModelCheckpoint(filepath=get_sharpening_fname(wandb.run.name), monitor="val_image_loss", save_freq=5000),
-            DiffusionTrainingLog(dev_dataset, sharpen_dataset, log_frequency=25, test_frequency=400)
-    ])
+            WandbModelCheckpoint(filepath=get_sharpening_fname(wandb.run.name), monitor="val_image_loss", save_freq=20000//args.train_batch_size),
+            DiffusionTrainingLog(dev_dataset, sharpen_dataset, log_frequency=25, test_frequency=5000//args.train_batch_size, train_batch_size=args.train_batch_size)
+    ], steps_per_epoch = APPROX_DATASET_SIZE)
 
 if __name__ == "__main__":
     given_arguments = parser.parse_args([] if "__file__" not in globals() else None)
