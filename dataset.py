@@ -46,6 +46,23 @@ class ImageLoading:
         img.set_shape((width, height, 3))
         return img
 
+    @staticmethod
+    def image_mean(img, keepdims=False):
+        #allows dimensions [..., w, h, channels]
+        return tf.reduce_mean(img, (-3, -2), keepdims=keepdims)
+
+    @classmethod
+    def image_mean_flat(cls, img):
+        return tf.reduce_mean(cls.image_mean(img))
+
+    @classmethod
+    def image_variance(cls, img):
+        mean = cls.image_mean(img, keepdims=True)
+        return tf.reduce_mean(tf.square(img-mean))
+    
+    @classmethod
+    def image_variance_flat(cls, img):
+        return tf.reduce_mean(cls.image_variance(img), 0)
 
     def _create_place_dataset(self, place, shuffle_buffer=1024):
         data_boxes = self.data_boxes[place]
@@ -54,6 +71,7 @@ class ImageLoading:
         def delete_dark(img):
             return tf.reduce_mean(img) > 0.2
         def delete_monochrome(img):
+            #return tf.reduce_mean(tf.math.reduce_std(img, (1, 2)), -1) > 0.08
             return tf.reduce_mean(tf.square(img-tf.reduce_mean(img, (1, 2), keepdims=True))) > 0.003
         image_paths, _, _ = dataset_utils.index_directory(f"{self.dataset_location}/{place}", labels=None, formats=(".jpg",))
         dataset = tf.data.Dataset.from_tensor_slices(image_paths)
@@ -65,7 +83,6 @@ class ImageLoading:
             .filter(delete_dark)\
             .filter(delete_monochrome)\
             .shuffle(shuffle_buffer)
-
 
     #def _create_place_dataset(self, place):
         #data_boxes = self.data_boxes[place]
@@ -87,30 +104,22 @@ class ImageLoading:
     def create_train_dev_datasets(self, dev_examples, batch_size):
         return self.batch(self.full_dataset.skip(dev_examples), batch_size), self.batch(self.full_dataset.take(dev_examples), batch_size)
 
+    @staticmethod
+    def analyze_dataset(dataset, func, samples=100):
+        return np.array(list(map(func, islice(dataset.as_numpy_iterator(), samples))))
 
-def analyze_dataset(dataset, func, samples=1000):
-    return np.array(list(map(func, islice(dataset.as_numpy_iterator(), samples))))
+    #dataset elements of form [batch, width, height, channels]
+    @classmethod
+    def img_dataset_mean(cls, dataset, samples=100):
+        return np.mean(cls.analyze_dataset(dataset, cls.image_mean_flat, samples), 0)
 
-#dataset elements of form [batch, width, height, channels]
-def img_dataset_mean(dataset, samples=1000):
-    #mean over batch, width and height
-    def mean(x):
-        return np.mean(x, [0, 1, 2])
-    return np.mean(analyze_dataset(dataset, mean,samples), 0)
+    @classmethod
+    def img_dataset_variance(cls, dataset, samples=100):
+        return np.mean(cls.analyze_dataset(dataset, cls.image_variance_flat, samples), 0)
 
-def img_dataset_variance(dataset, mean, samples=1000):
-    def variance(x):
-        return np.mean(np.square(x-mean), [0, 1, 2])
-    return np.mean(analyze_dataset(dataset, variance, samples), 0)
-
-
-
-# import matplotlib.pyplot as plt
-# def plot_image_variances(dataset, samples=1000):
-#     def variance(x):
-#         #[batch, 3]
-#         image_means = np.mean(x, (1, 2), keepdims=True)
-#         return np.mean(np.square(x-image_means), (1, 2, 3))
-#     variances = analyze_dataset(dataset, variance, samples).ravel()
-#     plt.hist(variances, bins=100)
-#     plt.show()
+    @classmethod
+    def plot_image_variances(cls, dataset, samples=1000):
+        import matplotlib.pyplot as plt
+        variances = cls.analyze_dataset(dataset, cls.image_variance_flat, samples).ravel()
+        plt.hist(variances, bins=100)
+        plt.show()

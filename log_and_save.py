@@ -74,6 +74,10 @@ class Log:
     def __init__(self) -> None:
         self.log = {}
 
+    def log_image(self, name, image):
+        self.log[name] = wandb.Image(image)
+        return self
+
     def log_images(self, name, images):
         self.log[name] = [wandb.Image(i) for i in images]
         return self

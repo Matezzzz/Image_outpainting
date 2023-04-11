@@ -243,13 +243,13 @@ class MaskGIT(tf.keras.Model):
     #         self._transformer_model.optimizer.minimize(loss, self._transformer_model.trainable_variables, tape)
     #     return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
 
-    def test_decode(self, input_tokens, sample=True):
+    def test_decode(self, input_tokens, decode_steps, sample=True):
         #[batch, positions]
         tokens = self.reshape_to_seq(input_tokens)
         token_logits = tf.zeros([tf.shape(input_tokens)[0], self.token_count, self.codebook_size])
         unknown_counts = tf.reduce_sum(tf.cast(tokens==MASK_TOKEN, tf.int32), -1)
-        for i in range(self.decode_steps):
-            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, training=False, sample=sample)
+        for i in range(decode_steps):
+            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, training=False, decode_steps=decode_steps, sample=sample)
             tokens = tf.where(write_mask, sampled_tokens, tokens)
             token_logits = tf.where(write_mask[:, :, tf.newaxis], logits, token_logits)
         return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
@@ -261,7 +261,7 @@ class MaskGIT(tf.keras.Model):
     def mask_schedule(self, mask_ratio):
         return tf.math.cos(np.pi / 2 * mask_ratio)
 
-    def decode_step(self, tokens, initial_unknown_counts, step_i, training, sample=True):
+    def decode_step(self, tokens, initial_unknown_counts, step_i, training, decode_steps, sample=True):
         batch_size = tf.shape(tokens)[0]
         token_count = self.token_count
         #[batch, positions, tokens]
@@ -281,10 +281,10 @@ class MaskGIT(tf.keras.Model):
         selected_probs = tf.gather(tf.nn.softmax(logits, axis=-1), sampled_tokens, axis=-1, batch_dims=2)
         selected_probs = tf.where(unknown_tokens, selected_probs, np.inf)
 
-        ratio = (step_i + 1.0) / self.decode_steps
+        ratio = (step_i + 1.0) / decode_steps
         mask_ratio = self.mask_schedule(ratio)
         #[batch]
-        if step_i == self.decode_steps-1:
+        if step_i == decode_steps-1:
             mask_len = tf.zeros_like(initial_unknown_counts)
         else:
             mask_len = tf.maximum(step_i+1, tf.cast(tf.floor(tf.cast(initial_unknown_counts, tf.float32) * mask_ratio), tf.int32))
