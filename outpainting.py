@@ -9,7 +9,7 @@ import tensorflow as tf
 from utilities import get_maskgit_fname, tf_init, get_sharpening_fname, GeneratorProgressBar
 from maskgit import MaskGIT, MASK_TOKEN
 from dataset import ImageLoading
-from log_and_save import WandbManager, Log
+from log_and_save import WandbLog
 from diffusion_model_upscale import DiffusionModel
 
 
@@ -140,7 +140,7 @@ class GridGenerator:
 
 
 
-
+# pylint: disable=too-few-public-methods
 class OutpaintingInfo:
     """
     Holds constants that are used during many outpainting methods.
@@ -328,7 +328,7 @@ def main(args):
     dataset = ImageLoading(args.dataset_location, args.img_size, args.places).create_dataset(args.batch_size)
 
     #start wandb for logging
-    WandbManager("image_outpainting_results").start(args)
+    WandbLog.wandb_init("image_outpainting_results", args)
 
     #holds constants used during multiple outpainting methods
     outpaint_info = OutpaintingInfo(args, maskgit)
@@ -361,7 +361,7 @@ def main(args):
         outpainted_image = decode_outpainted_tokens(outpainted_tokens, maskgit, outpaint_info, args.samples)
 
         #prepare images for being logged to wandb
-        log = Log().log_images("Images", batch).log_images("Outpainted low resolution", outpainted_image)
+        log = WandbLog().log_images("Images", batch).log_images("Outpainted low resolution", outpainted_image)
 
         #if upscaling should be done
         if args.generate_upsampled:

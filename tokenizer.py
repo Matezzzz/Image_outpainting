@@ -4,9 +4,9 @@ import numpy as np
 import tensorflow as tf
 import wandb
 
-from build_network import NetworkBuild as nb, Tensor
+from build_network import NetworkBuild as nb, NBTensor
 from dataset import ImageLoading
-from log_and_save import TrainingLog, WandbManager
+from log_and_save import TrainingLog, WandbLog
 from wandb.keras import WandbModelCheckpoint
 from utilities import get_tokenizer_fname, tf_init
 
@@ -161,7 +161,7 @@ class VectorQuantizer(tf.keras.layers.Layer):
 def create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim):
     #create the encoder - start with downscaling residual blocks, then group norm, swish and a 2d convolution predicting the vectors in the embedding space
     def encoder(x):
-        out = Tensor(x)\
+        out = NBTensor(x)\
             >> nb.residual_downscale_sequence(filters * np.array(residual_layer_multipliers), num_res_blocks, nb.batch_norm, nb.swish)\
             >> nb.group_norm()\
             >> nb.swish\
@@ -172,7 +172,7 @@ def create_encoder(filters, residual_layer_multipliers, num_res_blocks, embeddin
 
 
 
-def create_decoder(filters, residual_layer_multipliers, num_res_blocks, decoder_noise_dim):
+def create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim, decoder_noise_dim):
     #create the decoder
     def decoder(x):
         #when decoding, we might want to add some noise dimensions to the input (similar to the random noise used as input for GANs)
@@ -184,9 +184,9 @@ def create_decoder(filters, residual_layer_multipliers, num_res_blocks, decoder_
                 return tf.concat([x, tf.random.normal([shape[0], shape[1], shape[2], decoder_noise_dim])], -1)
             return x
         # add noise, one processing convolution, then upscale using tranposed convolutions and residual blocks. Do group norm, swish, then predict the final colors
-        out = Tensor(x)\
+        out = NBTensor(x)\
             >> add_noise_dims\
-            >> nb.conv_2d(filters*residual_layer_multipliers[-1])\
+            >> nb.conv_2d(embedding_dim)\
             >> nb.residual_upscale_sequence(filters * np.array(residual_layer_multipliers[::-1]), num_res_blocks, nb.batch_norm, nb.swish)\
             >> nb.group_norm()\
             >> nb.swish\
@@ -198,7 +198,7 @@ def create_decoder(filters, residual_layer_multipliers, num_res_blocks, decoder_
 
 def create_discriminator(image_size, residual_blocks):
     """Create the discriminator model"""
-    def discriminator(x : Tensor):
+    def discriminator(x : NBTensor):
         """Downscaling convolution -> Multiple downscaling residual blocks -> global average pooling -> dense prediction layer"""
         y = x\
             >> nb.conv_2d_down(8, activation="relu")\
@@ -251,7 +251,7 @@ class VQVAEModel(tf.keras.Model):
                                              lambda x: x >> create_encoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim))
 
         self._decode_model = nb.create_model(nb.inp(self._encode_model.output_shape[1:]),
-                                             lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, decoder_noise_dim))
+                                             lambda x: x >> create_decoder(filters, residual_layer_multipliers, num_res_blocks, embedding_dim, decoder_noise_dim))
 
         #the model that will be trained - pass through the encoder, then the quantization operation, then the decoder
         self._model = nb.create_model(nb.inp(inp_shape), lambda x: x >> self._encode_model >> self._quantizer >> self._decode_model)
@@ -355,20 +355,20 @@ class VQVAEModel(tf.keras.Model):
         """
 
         #support loading old models with a missing value in their config
-        def vqvae_load_old(*args2, **kwargs):
-            #if the decoder_noise_dim parameters is missing, set it to the default value
-            if "decoder_noise_dim" not in kwargs:
-                kwargs["decoder_noise_dim"] = args.decoder_noise_dim
-            return VQVAEModel(*args2, **kwargs)
+        # def vqvae_load_old(*args2, **kwargs):
+        #     #if the decoder_noise_dim parameters is missing, set it to the default value
+        #     if "decoder_noise_dim" not in kwargs:
+        #         kwargs["decoder_noise_dim"] = args.decoder_noise_dim
+        #     return VQVAEModel(*args2, **kwargs)
 
         #load the model
-        vqvae_old = tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss})
-        return vqvae_old
+        vqvae_old = tf.keras.models.load_model(fname)#, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss})
+        #return vqvae_old
 
         # code that can help with loading problems
-        # vqvae = VQVAEModel.new(args)
-        # vqvae.set_weights(vqvae_old.get_weights())
-        # return vqvae
+        vqvae = VQVAEModel.new(args)
+        vqvae.set_weights(vqvae_old.get_weights())
+        return vqvae
 
 
     @property
@@ -458,7 +458,7 @@ def main(args):
     show_dataset = image_load.create_dataset(8)
 
     #start wandb logging
-    WandbManager("image_outpainting_tokenizer").start(args)
+    WandbLog.wandb_init("image_outpainting_tokenizer", args)
 
     #create the logging class - log metrics every 25 batches, run validation / show images every 400
     model_log = VQVAELog(dev_dataset, show_dataset, 25, 400)

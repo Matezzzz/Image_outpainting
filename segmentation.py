@@ -8,7 +8,7 @@ import numpy as np
 
 from utilities import save_image, get_mask_fname, get_mask_dir, load_images_place, GeneratorProgressBar
 
-from log_and_save import WandbManager, Log
+from log_and_save import WandbLog
 
 
 parser = argparse.ArgumentParser()
@@ -162,7 +162,7 @@ def image_segmentation(dataset_location, place, log_wandb=False, iterations=SEGM
 
     #start wandb logging if requested
     if log_wandb:
-        WandbManager("image_outpainting_segmentation").start({"dataset_location":dataset_location, "place":place})
+        WandbLog.wandb_init("image_outpainting_segmentation", {"dataset_location":dataset_location, "place":place})
 
     #load the first SEGMENTATION_ITERATIONS images available for a given place
     loaded_images = load_images_place(dataset_location, place, image_count_limit=iterations)
@@ -185,7 +185,7 @@ def image_segmentation(dataset_location, place, log_wandb=False, iterations=SEGM
 
         #log results to wandb every 10 iterations
         if log_wandb and i % 10 == 0:
-            Log().log_image("gradient mask", gradient_mask).log_image("closed mask", closed_mask).log_image("filled mask", filled_mask)\
+            WandbLog().log_image("gradient mask", gradient_mask).log_image("closed mask", closed_mask).log_image("filled mask", filled_mask)\
                 .log_image("discard_mask", discard_mask).log_image("sides masked mask", sides_masked_mask).commit()
 
         #if a pixel is masked this step, increase the consecutive sum, else reset it back to 0
@@ -199,7 +199,7 @@ def image_segmentation(dataset_location, place, log_wandb=False, iterations=SEGM
 
     #log the final mask and the filled version if logging is on
     if log_wandb:
-        Log().log_image("final mask", final_mask).log_image("final mask filled", final_mask_filled).commit()
+        WandbLog().log_image("final mask", final_mask).log_image("final mask filled", final_mask_filled).commit()
     #save the final mask for a given place and return it
     save_image(get_mask_fname(place), final_mask_filled)
     return final_mask
