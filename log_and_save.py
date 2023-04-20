@@ -39,7 +39,7 @@ class WandbManager:
         wandb.init(project=self.project, config=args)
         wandb.run.log_code(".")
         return wandb.run.name
-    
+
     def resume(self, resume_name_part, args):
         api = wandb.Api()
         runs = api.runs(f"{self.user}/{self.project}", filters={"display_name": {"$regex":f".*{resume_name_part}.*"}})
@@ -126,7 +126,7 @@ class TrainingLog(tf.keras.callbacks.Callback):
 
     def run_validation(self):
         return self.model.evaluate(self.dev_dataset, return_dict=True, verbose=0)
-        
+
 
 
 

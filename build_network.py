@@ -47,8 +47,8 @@ class NetworkBuild:
         return tf.keras.Model(inp, out, name=name)
 
     @staticmethod
-    def dense(*args, **kwargs):
-        return tf.keras.layers.Dense(*args, **kwargs)
+    def dense(units : int, activation : str, **kwargs):
+        return tf.keras.layers.Dense(units, activation=activation, **kwargs)
 
     @staticmethod
     def repeat(repeats, axis):
@@ -67,15 +67,6 @@ class NetworkBuild:
         def apply(x):
             return tf.concat([x, tensor.get()], axis)
         return apply
-
-    #dense = lambda u, act = None: TensorflowOp(tf.keras.layers.Dense(u, activation=act))
-
-    # @staticmethod
-    # def flattenInternal(batch_dims, x):
-    #     s = tf.shape(x)
-    #     return tf.reshape(x, tf.concat([s[:batch_dims], [tf.reduce_prod(s[batch_dims:])]], axis=0))
-
-    #flatten = lambda batch_dims = 1:   TensorflowOp(lambda x:NetworkBuild.flattenInternal(batch_dims, x))
 
     @staticmethod
     def flatten():
@@ -170,7 +161,6 @@ class NetworkBuild:
     @classmethod
     def residual_block(cls, filters, conv_func = conv_2d, norm_func : Callable = batch_norm, activation: Callable = relu, strides=1):
         def residual_link(x):
-            #main_link = cls.residual_main_link(filters, conv_func, norm_func, activation, strides)(x)
             return (x if filters == x.shape[-1] else conv_func(filters, kernel_size=1)(x)) if strides == 1 else conv_func(filters, strides=strides)(x)
         return cls.residual_link_ext(
             cls.residual_block_main_link(filters, conv_func, norm_func, activation, strides),
@@ -225,7 +215,6 @@ class NetworkBuild:
             return x
         return unet
 
-
     @staticmethod
     def lstm(units, *args, **kwargs):
         return tf.keras.layers.LSTM(units, *args, **kwargs)
@@ -246,7 +235,7 @@ class NetworkBuild:
     @classmethod
     def transformer_mlp(cls, hidden_size, intermediate_size):
         def apply(x):
-            out = Tensor(x) >> cls.residual_link(lambda x: (Tensor(x) >> cls.dense(intermediate_size) >> cls.dense(hidden_size) >> cls.dropout(0.1)).get()) >> cls.layer_norm()
+            out = Tensor(x) >> cls.residual_link(lambda x: (Tensor(x) >> cls.dense(intermediate_size, "gelu") >> cls.dense(hidden_size, None) >> cls.dropout(0.1)).get()) >> cls.layer_norm()
             return out.get()
         return apply
 

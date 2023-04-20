@@ -1,17 +1,19 @@
-import tensorflow as tf
-from utilities import get_maskgit_fname, get_tokenizer_fname, tf_init, get_sharpening_fname
-from maskgit import MaskGIT, MASK_TOKEN
-#from tokenizer import VQVAEModel
-from dataset import ImageLoading
 from itertools import islice
+import argparse
+
+
+import numpy as np
+import tensorflow as tf
+
+
+from utilities import get_maskgit_fname, tf_init, get_sharpening_fname, GeneratorProgressBar
+from maskgit import MaskGIT, MASK_TOKEN
+from dataset import ImageLoading
 from log_and_save import WandbManager, Log
-import wandb
 from diffusion_model_upscale import DiffusionModel
 
 
-import argparse
 
-import numpy as np
 
 parser = argparse.ArgumentParser()
 
@@ -32,12 +34,12 @@ parser.add_argument("--decoding",default="full", type=str, help="What decoding m
 parser.add_argument("--maskgit_steps", default=12, type=int, help="Steps during maskgit generation")
 parser.add_argument("--diffusion_steps", default=50, type=int, help="Steps during diffusion model upscaling")
 
-parser.add_argument("--generate_upsampled", default=True, type=bool, help="Whether to generate upscaled images")
+parser.add_argument("--generate_upsampled", default=False, type=bool, help="Whether to generate upscaled images")
 
 parser.add_argument("--maskgit_run", default="025", type=str, help="The maskgit version to use")
 parser.add_argument("--sharpen_run", default="", type=str, help="The sharpener/upscaler version to use")\
 
-parser.add_argument("--outpainting_step", default=0.25, type=float, help="The step to use during token generation and upsampling")
+parser.add_argument("--outpaint_step", default=0.25, type=float, help="The step to use during token generation and upsampling")
 
 
 
@@ -49,244 +51,327 @@ parser.add_argument("--places", default=["brno"], type=list[str], help="Individu
 
 
 
-
-class ProgressBar:
-    def __init__(self, generator, total_steps = None, print_steps = 30):
-        if total_steps is None:
-            total_steps = len(generator)
-        self.total_steps = total_steps
-        self.print_steps = print_steps
-        self.steps = 0
-        self.i = 0
-        self.generator = generator
-        
-    def step(self):
-        self.steps += 1
-        new_i = (self.steps + 0.5) / self.total_steps * self.print_steps
-        c = int(new_i - self.i)
-        if c:
-            print ("#"*c, flush=True, end="")
-        self.i += c
-    
-    def __iter__(self):
-        self.start()
-        for a in self.generator:
-            yield a
-            self.step()
-        self.end()
-        
-    def start(self):
-        print (f"|{' '*self.print_steps}|" + '\b'*(self.print_steps+1), end="", flush=True)
-        
-    def end(self):
-        print("|", end="\n")
-
-
-
-
-
 class SpiralGenerator:
-    def __init__(self, spiral_layers, spiral_middle, step_size, start_radius = None, include_mid = False):
+    """
+    A generator class for points on a square spiral
+    """
+    def __init__(self, spiral_layers, spiral_middle, step_size, include_mid = False):
+        """
+        Create a spiral generator.
+        
+        :param spiral_layers how many times to go around the spiral, all 4 sides
+        :param spiral_middle coordinates of the spiral middle point
+        :param step_size the radius of the first spiral square, and the step between two different rectangles
+        :param include_mid whether to return the middle point before starting to circle around
+        """
         self.layers = spiral_layers
         self.middle = spiral_middle
         self.step = step_size
-        self.start_radius = start_radius if start_radius is not None else step_size
         self.include_mid = include_mid
-        
+
     def __iter__(self):
-        return self.generate()
-    
-    def generate(self):
+        #return the middle if enabled
         if self.include_mid:
             yield self.middle
+
+        #go over all squares that the spiral is composed of
         for outpaint_step in range(self.layers):
-            hs = (outpaint_step + 1) * self.step
-            corners = np.array([self.middle-hs, self.middle+np.array([-hs[0], hs[1]]), self.middle+hs, self.middle+np.array([hs[0], -hs[1]])])
-            side_steps = 2*(outpaint_step+1)
-            def get_pos(i):
-                ci, si = divmod(i, side_steps)
-                c1, c2 = corners[ci], corners[(ci+1)%4]
-                return c1 + (c2 - c1) // side_steps * si 
-            for sub_step in range(4*side_steps):
-                yield get_pos((sub_step+1)%(4*side_steps))
-         
+            #compute how many points will be on one side of the square
+            step_count = 2*(outpaint_step+1)
+            #go over all positions on the square and return them
+            for pos in self._generate_square(step_count):
+                yield pos
+
+    def _generate_square(self, steps_per_side):
+        #find out the length of one side
+        side_len = steps_per_side * self.step
+        radius = side_len / 2
+        #compute square corners
+        corners = np.array([self.middle-radius, self.middle+np.array([-radius[0], radius[1]]), self.middle+radius, self.middle+np.array([radius[0], -radius[1]])])
+        #get position on the square
+        def get_pos(i):
+            #compute the index of the corner before the point and the index on the current side
+            corner_i, side_i = divmod(i, steps_per_side)
+            #compute the corners between which the point lies
+            corner_from, corner_to = corners[corner_i], corners[(corner_i+1)%4]
+            #interpolate between the two corners based on side_i
+            return corner_from + (corner_to - corner_from) * side_i // steps_per_side
+        #go over all four square sides
+        for sub_step in range(4*steps_per_side):
+            yield get_pos((sub_step+1)%(4*steps_per_side))
+
     def __len__(self):
-        return sum([4*(2*(s+1)) for s in range(self.layers)])
+        """
+        Compute number of spiral points generated by this class
+        """
+        # = sum of all squares, 4 sides per square, 2*(s+1) points on each side, where s is the distance from center
+        return sum(4*(2*(s+1)) for s in range(self.layers))
 
 
 class GridGenerator:
+    """
+    Class that generates all points on a grid. Think np.linspace in 2D
+    """
     def __init__(self, max_pos, step_count):
+        """
+        Create a grid generator. Points will lie between 0 and max_pos, step_count samples will be created in each dimension.
+        """
         self.max_pos = max_pos
         self.step_count = step_count
-        
+
     def __iter__(self):
-        return self.generate()
-    
-    def generate(self):
+        """
+        Iterate over the grid defined by this class
+        """
+        #create the 1D linspaces for both x and y
         lspace = np.linspace(0, self.max_pos, self.step_count, dtype=np.int32)
-        xs, ys = np.meshgrid(lspace[:, 0], lspace[:, 1])
-        for a in zip(xs.ravel(), ys.ravel()):
-            yield np.array(a)
+        #coordinates for all x and y points
+        x_positions, y_positions = np.meshgrid(lspace[:, 0], lspace[:, 1])
+        #go over all coordinates, return a numpy array of each double separately
+        for position in zip(x_positions.ravel(), y_positions.ravel()):
+            yield np.array(position)
 
     def __len__(self):
+        """
+        Get number of points on this grid = step_count^2
+        """
         return self.step_count * self.step_count
 
 
 
+
+
+class OutpaintingInfo:
+    """
+    Holds constants that are used during many outpainting methods.
+    """
+
+    def __init__(self, args : argparse.Namespace, maskgit : MaskGIT):
+        self.image_size = args.img_size
+
+        self.outpaint_range = args.outpaint_range
+
+        self.pixels_per_token = maskgit.downscale_multiplier
+
+        self.image_size_tokens = self.image_size // self.pixels_per_token
+        self.outpaint_step_tokens = int(self.image_size_tokens * args.outpaint_step)
+        self.outpainting_total = self.outpaint_step_tokens * args.outpaint_range
+        self.outpainted_image_size_tokens = 2 * self.outpainting_total + self.image_size_tokens
+        self.outpainted_image_middle_tokens = self.outpainted_image_size_tokens//2
+
+        self.outpainted_image_size = self.outpainted_image_size_tokens * self.pixels_per_token
+
+        #size of the original image, if it got upscaled
+        self.upscaled_image_size = 4 * self.image_size
+
+        #size of the upscaled & outpainted image
+        self.outpainted_upscaled_image_size = 4 * self.outpainted_image_size
+
+
+def get_slice(data, data_from, data_size):
+    """A shortcut for `data[..., data_from[0]:data_from[0]+data_size[0], data_from[1]:data_from[1]+data_size[1]]`"""
+    return data[..., data_from[0]:data_from[0]+data_size[0], data_from[1]:data_from[1]+data_size[1]]
+
+
+def set_slice(data, data_from, data_size, set_data, operation = None):
+    """
+    A shortcut for `data[..., data_from[0]:data_from[0]+data_size[0], data_from[1]:data_from[1]+data_size[1]] = set_data`
+    
+    operation can be passed to perform a different operation than assignment.
+    """
+    data_slice = get_slice(data, data_from, data_size)
+    if operation is None:
+        data_slice[...] = set_data
+    else:
+        operation(data_slice, set_data)
+
+
+def outpaint_tokens(source_tokens, maskgit : MaskGIT, info : OutpaintingInfo, decoding_steps : int, generation_temperature : float, decoding="full"):
+    """
+    Outpaint given tokens using the provided MaskGIT model.
+
+    Decoding can be either "full" or "simple".
+    """
+
+    #the array we will fill with the outpainted tokens
+    outpainted_tokens = np.full([source_tokens.shape[0], *info.outpainted_image_size_tokens], MASK_TOKEN, dtype=np.int32)
+    #save the tokens of the original image at the center
+    set_slice(outpainted_tokens, info.outpainting_total, info.image_size_tokens, source_tokens)
+
+    #start near the middle, where the original tokens are placed, and gradually continue outwards
+    for pred_pos in GeneratorProgressBar(SpiralGenerator(info.outpaint_range, info.outpainted_image_middle, info.outpaint_step_tokens)):
+        outpaint_from = pred_pos - info.image_size_tokens//2
+        #get tokens that serve as current input to maskgit
+        input_tokens = get_slice(outpainted_tokens, outpaint_from, info.image_size_tokens)
+
+        #we try multiple times and take the result with the largest variance. This should cause more interesting images to get chosen.
+        best_scores, best_tokens = None, None
+        for _ in range(1):
+            #figure out the current missing tokens
+            if decoding == "simple":
+                new_tokens = maskgit.test_decode_simple(input_tokens)[0]
+            elif decoding == "full":
+                new_tokens = maskgit.test_decode(input_tokens, decoding_steps, generation_temperature)[0]
+            else:
+                raise NotImplementedError()
+
+            #get the image back from decoded tokens
+            decoded = maskgit.from_tokens(new_tokens)
+
+            #has_black = tf.reduce_min(tf.reduce_mean(decoded, -1), (1, 2)) < img_dark - 0.1
+            #use the image to compute its standard deviation - a measure of how diverse an image is - we prefer images with more changes in color
+            color_std_dev = tf.reduce_mean(tf.math.reduce_std(decoded, (1, 2)), -1)
+            scores = color_std_dev# - tf.where(has_black, 1.0, 0.0)
+
+            #keep the tokens with the largest score
+            if best_tokens is None:
+                best_tokens = new_tokens
+                best_scores = scores
+            else:
+                best_tokens = tf.where((scores > best_scores)[:, tf.newaxis, tf.newaxis], new_tokens, best_tokens)
+                best_scores = tf.maximum(best_scores, scores)
+        #replace all undefined tokens with the best tokens instead
+        input_tokens[...] = np.where(input_tokens == MASK_TOKEN, best_tokens, input_tokens)
+
+        #set_slice(outpainted_tokens, outpaint_from, info.image_size_tokens, np.where(input_tokens == MASK_TOKEN, best_tokens, input_tokens))
+    return outpaint_tokens
+
+
+def decode_outpainted_tokens(outpainted_tokens, maskgit : MaskGIT, info : OutpaintingInfo, samples):
+    """
+    Convert the outpainted tokens to an image
+    """
+
+    #size of the image after decoding
+    decoded_size = np.array([tf.shape(outpainted_tokens)[0], info.outpainted_image_size, info.outpainted_image_size])
+    #output image = sum of rendering results, weighed by blending weights
+    output_image = np.zeros([*decoded_size, 3])
+    #blending sum = sum of blending weights for each pixel
+    blending_sum = np.zeros([*decoded_size, 1])
+
+    blend_range = np.arange(1, info.image_size+1)
+    #blending value = distance from the border. Used to mix multiple samples during rendering
+    blending = np.minimum(
+        np.minimum(blend_range, blend_range[::-1])[:, np.newaxis],
+        np.minimum(blend_range, blend_range[::-1])[np.newaxis, :]
+    )[:, :, np.newaxis]
+
+    #for all samples on a grid
+    for render_from in GeneratorProgressBar(GridGenerator(info.outpainting_total, info.outpaint_range * samples)):
+        #convert the rectangle at current position to an image
+        colors = maskgit.from_tokens(get_slice(outpainted_tokens, render_from, info.image_size_tokens))
+
+        render_output_from = render_from * info.pixels_per_token
+
+        def add(x, y):
+            x += y
+
+        #add colors * blending to the respective place in the output image
+        set_slice(output_image, render_output_from, info.image_size, colors * blending, add)
+        #add blending weights to the same place
+        set_slice(blending_sum, render_output_from, info.image_size, blending, add)
+    # return output image / total blending sum at each place
+    return output_image / blending_sum
+
+
+
+def upscale_image(image, upscaling_model : DiffusionModel, info : OutpaintingInfo, diffusion_steps):
+    """
+    Upscale a given outpainted image.
+    """
+
+    #size of the resulting image
+    outpainted_image_size = info.outpainted_upscaled_image_size
+    final_image_shape = [tf.shape(image)[0], outpainted_image_size, outpainted_image_size]
+
+    #the upscaled image
+    final_image = np.zeros([*final_image_shape, 3])
+    #True for the pixels that were upscaled already
+    final_image_mask = np.zeros([*final_image_shape, 1], bool)
+
+    outpaint_image_size = info.outpainting_total * info.pixels_per_token
+    #go over all positions in the small image
+    for upscale_from in GeneratorProgressBar(GridGenerator(outpaint_image_size, int(np.ceil(outpaint_image_size * 1.25 / info.image_size)))):
+        #get the image part
+        inp_img = get_slice(image, upscale_from, info.image_size)
+
+        #upscale the decoded image
+        upscaled_blurry = tf.image.resize(inp_img, [info.upscaled_image_size, info.upscaled_image_size], tf.image.ResizeMethod.BICUBIC)
+
+        #figure out which parts I should add details to, and which are already done in the target image
+        target_image = get_slice(final_image, upscale_from, info.upscaled_image_size)
+        target_mask = get_slice(final_image_mask, upscale_from, info.upscaled_image_size)
+
+        #add details to the blurry upscaled images by using the diffusion model
+        upscaled = upscaling_model.improve_images(upscaled_blurry, diffusion_steps, target_mask, target_image)
+
+        #save the image with added details, and set the mask to true
+        target_image[...] = upscaled
+        target_mask[...] = True
+    return final_image
+
+
+
+
 def main(args):
+    #set up tensorflow to use the specified GPU, number of threads, and seed
     tf_init(args.use_gpu, args.threads, args.seed)
 
-
-    maskgit = MaskGIT.load(get_maskgit_fname())
+    #load maskgit from a file and set the generation temperature
+    maskgit = MaskGIT.load(get_maskgit_fname(args.maskgit_run))
     maskgit.set_generation_temp(args.generation_temp)
-    
-    upscaler = DiffusionModel.load(get_sharpening_fname())
 
+    #load the upscaler if it is required
+    upscaling_model = DiffusionModel.load(get_sharpening_fname(args.sharpen_run)) if args.generate_upsampled else None
+
+    #load the image dataset with a given batch size
     dataset = ImageLoading(args.dataset_location, args.img_size, args.places).create_dataset(args.batch_size)
-    
+
+    #start wandb for logging
     WandbManager("image_outpainting_results").start(args)
-    
-    
-    i_size = args.img_size
-    token_mult = np.array(maskgit.downscale_multiplier)
-    i_size_tokens = i_size // token_mult
-    op_step = (i_size_tokens * args.outpainting_step).astype(np.int32)
-    op_total = op_step * args.outpaint_range
-    target_size = 2 * op_total + i_size_tokens
-    mid = op_total + i_size_tokens//2
-    
+
+    #holds constants used during multiple outpainting methods
+    outpaint_info = OutpaintingInfo(args, maskgit)
+
+    # Visualize the outpainting process.
     # for pred_pos in SpiralGenerator(args.outpaint_range, mid, op_step):
     #     f, t =  pred_pos- i_size_tokens//2, pred_pos+i_size_tokens//2
     #     mask = np.zeros(target_size)
     #     mask[op_total[0]:op_total[0]+i_size_tokens[0], op_total[1]:op_total[1]+i_size_tokens[1]] = 0.5
     #     mask[f[0]:t[0], f[1]:t[1]] = 1.0
     #     Log().log_image("generation mask", mask).commit()
-    
-    
-    #imgs = np.tile(np.arange(128)[:, np.newaxis, np.newaxis], (1, 32, 32))
-    #dec = maskgit.from_tokens(imgs)
-    #Log().log_images("tokens visualized", dec).commit()
-    
-    
+
+    #go over all batches
     for batch_i, batch in islice(enumerate(iter(dataset)), args.example_count):
-        batch_size = tf.shape(batch)[0].numpy()
-        batch_repeated = tf.repeat(batch, tf.fill(batch_size, args.attempt_count), axis=0)
-        
-        
         print (f"Batch {batch_i+1} out of {args.example_count}:")
-        initial_tokens = maskgit.to_tokens(batch_repeated)
-        tokens = np.full([batch_size*args.attempt_count, target_size[0], target_size[1]], MASK_TOKEN, dtype=np.int32)
-        tokens[:, op_total[0]:op_total[0]+i_size_tokens[0], op_total[1]:op_total[1]+i_size_tokens[1]] = initial_tokens
+        #convert the batch images to tokens
+        initial_tokens = maskgit.to_tokens(batch)
 
-        img_dark = tf.reduce_min(tf.reduce_mean(batch_repeated, -1), (1, 2))
-           
+        #repeat each set of tokens (args.attempt_count) times
+        initial_tokens_repeated = tf.repeat(initial_tokens, tf.fill(tf.shape(initial_tokens)[0].numpy(), args.attempt_count), axis=0)
+
+        #img_dark = tf.reduce_min(tf.reduce_mean(batch_repeated, -1), (1, 2))
+
         print(f" * {'Generating tokens:': <20} ", end="", flush=True)
-        for pred_pos in ProgressBar(SpiralGenerator(args.outpaint_range, mid, op_step)):
-            
-            f, t = pred_pos- i_size_tokens//2, pred_pos+i_size_tokens//2
-            inp = tokens[:, f[0]:t[0], f[1]:t[1]]
-            best_scores, best_tokens = None, None
-            
-            for _ in range(1):
-                if args.decoding == "simple":
-                    new_tokens = maskgit.test_decode_simple(inp)[0]
-                elif args.decoding == "full":
-                    new_tokens = maskgit.test_decode(inp, args.maskgit_steps)[0]
-                else:
-                    raise NotImplementedError()
+        #generate outpainted tokens
+        outpainted_tokens = outpaint_tokens(initial_tokens_repeated, maskgit, outpaint_info, args.maskgit_steps, args.generation_temperature, args.decoding)
 
-                decoded = maskgit.from_tokens(new_tokens)
-                
-                has_black = tf.reduce_min(tf.reduce_mean(decoded, -1), (1, 2)) < img_dark - 0.1
-                color_std_dev = tf.reduce_mean(tf.math.reduce_std(decoded, (1, 2)), -1)
-                scores = color_std_dev - tf.where(has_black, 1.0, 0.0)
-                #decoding_valid = tf.logical_and(not_black, not_monochrome)
-                
-                if best_tokens is None:
-                    best_tokens = new_tokens
-                    best_scores = scores
-                else:
-                    best_tokens = tf.where((scores > best_scores)[:, tf.newaxis, tf.newaxis], new_tokens, best_tokens)
-                    best_scores = tf.maximum(best_scores, scores)
-                
-                
-                #if tf.reduce_any(done_now):
-                #    tokens[done_now, f[0]:t[0], f[1]:t[1]] = np.where(tokens[done_now, f[0]:t[0], f[1]:t[1]] == MASK_TOKEN, new_tokens[done_now], tokens[done_now, f[0]:t[0], f[1]:t[1]])
-                
-                #done = tf.logical_or(done, done_now)
-                #if tf.reduce_all(done):
-                #    break
-            #if not tf.reduce_all(done):
-            #    print ("Not all images could be generated conditions!")
-            #print (f"{current_step+1}/{total_steps} done.")
-            #current_step += 1
-            tokens[:, f[0]:t[0], f[1]:t[1]] = np.where(tokens[:, f[0]:t[0], f[1]:t[1]] == MASK_TOKEN, best_tokens, tokens[:, f[0]:t[0], f[1]:t[1]])
-
-
-        final_img_lr_size = np.array([tf.shape(batch_repeated)[0], *(token_mult*target_size)])
-        output_colors_lowres, overlaps_lowres = np.zeros([*final_img_lr_size, 3]), np.zeros([*final_img_lr_size, 1])
-        ry, rx = np.arange(1, i_size+1), np.arange(1, i_size+1)
-        blending = np.minimum(
-            np.minimum(ry, ry[::-1])[:, np.newaxis],
-            np.minimum(rx, rx[::-1])[np.newaxis, :]
-        )[:, :, np.newaxis]
-        
-        
-        #lspace = np.linspace(0, 2 * op_step * args.outpaint_range, args.outpaint_range * args.samples, dtype=np.int32)
-        #xs, ys = np.meshgrid(lspace[:, 0], lspace[:, 1])
-        #total_steps = len(lspace[:, 0]) * len(lspace[:, 1])
-        #current_step = 0
         print(f" * {'Rendering:': <20} ", end="", flush=True)
-        for f in ProgressBar(GridGenerator(2 * op_step * args.outpaint_range, args.outpaint_range * args.samples)):# zip(xs.ravel(), ys.ravel()), xs.size):# lspace[:, 0]:# range(0, 1 + 2 * args.outpaint_range):
-            #for x in lspace[:, 1]:
-            #f = np.array([x, y])
-            t = f+i_size_tokens
-            colors = maskgit.from_tokens(tokens[:, f[0]:t[0], f[1]:t[1]])
-            fi, ti = f * token_mult, t*token_mult
-            output_colors_lowres[:, fi[0]:ti[0], fi[1]:ti[1]] += colors * blending
-            overlaps_lowres[:, fi[0]:ti[0], fi[1]:ti[1]] += blending
-            #print (f"{current_step+1}/{total_steps} done.")
-            #current_step += 1
-        final_images_low_res = output_colors_lowres / overlaps_lowres
-        
-        
-        final_image_size = [final_img_lr_size[0], *(final_img_lr_size[1:3] * 4)]
-        final_image = np.zeros([*final_image_size, 3])
-        final_image_mask = np.zeros([*final_image_size, 1], bool)
-        
-        log = Log().log_images("Images", batch).log_images("Outpainted low resolution", final_images_low_res)
+        #convert the outpainted tokens back to an image
+        outpainted_image = decode_outpainted_tokens(outpainted_tokens, maskgit, outpaint_info, args.samples)
+
+        #prepare images for being logged to wandb
+        log = Log().log_images("Images", batch).log_images("Outpainted low resolution", outpainted_image)
+
+        #if upscaling should be done
         if args.generate_upsampled:
             print(f" * {'Upscaling:': <20} ", end="", flush=True)
-            #lspace = np.linspace(0, 2 * op_step * args.outpaint_range, args.outpaint_range * args.samples, dtype=np.int32)
-            #xs, ys = np.meshgrid(lspace[:, 0], lspace[:, 1])
-            
-            
-            #for x, y in ProgressBar(SpiralGenerator(args.outpaint_range, final_img_lr_size[1:3] // 2, np.array([i_size, i_size]) // 2, include_mid=True)):
-            outpaint_size = 2 * args.outpaint_range * op_step * token_mult
-            for f in ProgressBar(GridGenerator(outpaint_size, np.ceil((outpaint_size[0] + i_size) * 1.25 / i_size).astype(np.int32))):
-                #fx, fy = np.array([x, y]) - i_size//2
-                #tx, ty = np.array([x, y]) + i_size//2
-                t = f + i_size
-                
-                inp_img = final_images_low_res[:, f[0]:t[0], f[1]:t[1]]
-                
-                upscaled_blurry = tf.image.resize(inp_img, [i_size*4, i_size*4], tf.image.ResizeMethod.BICUBIC)
-                
-                f2, t2 = 4*f, 4*t
-                
-                upscaled = upscaler.improve_images(upscaled_blurry, args.diffusion_steps, final_image_mask[:, f2[0]:t2[0], f2[1]:t2[1]], final_image[:, f2[0]:t2[0], f2[1]:t2[1]])
-                final_image[:, f2[0]:t2[0], f2[1]:t2[1]] = upscaled
-                final_image_mask[:, f2[0]:t2[0], f2[1]:t2[1]] = True
+            #create the final, upscaled image
+            final_image = upscale_image(outpainted_image, upscaling_model, outpaint_info, args.diffusion_steps)
+
             log.log_images("Outpainted full", final_image)
+        #log all images to wandb
         log.commit()
-        
-                
-                
-                
-
-    
-
-
 
 
 

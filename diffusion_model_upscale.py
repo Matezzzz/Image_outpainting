@@ -344,12 +344,12 @@ def main(args):
 
     #dataset of size 207730, 10 boxes, half is discarded, divide by batch size
     #APPROX_DATASET_SIZE = (207730 * 10 * 0.5 // args.batch_size) // 8 * 8
-    
+
     step = args.train_batch_size // args.batch_size
-    
+
     #12235 batches of size 64 (found out during another run). round down to the nearest multiple of step
     APPROX_DATASET_SIZE = (12235 * 64 // args.batch_size) // step * step
-    
+
     # run training and plot generated images periodically
     model.fit(
         train_dataset.repeat(),

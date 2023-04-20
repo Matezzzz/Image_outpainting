@@ -33,80 +33,18 @@ parser.add_argument("--mask_ratio", default=0.5, type=float, help="Percentage of
 
 
 
-parser.add_argument("--dataset_location", default=".", type=str, help="Directory to read data from")
+parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
 parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
 parser.add_argument("--load_model", default=False, type=bool, help="Whether to load a maskGIT model")
 
 
-# class TransformerAttention(tf.keras.layers.Layer):
-#     def __init__(self, hidden_size, attention_heads, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.hidden_size = hidden_size
-#         self.attention_heads = attention_heads
-#         self.layer = tf.keras.layers.MultiHeadAttention(attention_heads, hidden_size, dropout=0.1)
-#         self.layer_norm = nb.layerNorm()
 
-#     def build(self, input_shape):
-#         # pylint: disable=protected-access
-#         self.layer._build_from_signature(input_shape, input_shape)
-#         # pylint: enable=protected-access
-#         return super().build(input_shape)
-
-#     def call(self, inputs, *args, **kwargs):
-#         return self.layer_norm(inputs + self.layer(inputs, inputs))
-
-#     def get_config(self):
-#         return super().get_config() | {
-#             "hidden_size": self.hidden_size,
-#             "attention_heads": self.attention_heads
-#         }
-
-
-
-# class TransformerMLP(tf.keras.layers.Layer):
-#     def __init__(self, hidden_size, intermediate_size, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.hidden_size = hidden_size
-#         self.intermediate_size = intermediate_size
-#         self.dense1 = tf.keras.layers.Dense(self.intermediate_size, activation="gelu")
-#         self.dense2 = tf.keras.layers.Dense(self.hidden_size)
-#         self.dropout = tf.keras.layers.Dropout(0.1)
-#         self.layer_norm = tf.keras.layers.LayerNormalization()
-
-#     def call(self, inputs, *args, **kwargs):
-#         return self.layer_norm(inputs + self.dropout(self.dense2(self.dense1(inputs))))
-
-#     def get_config(self):
-#         return super().get_config() | {
-#             "hidden_size": self.hidden_size,
-#             "intermediate_size": self.intermediate_size,
-#         }
-
-
-# class TransformerLayer(tf.keras.layers.Layer):
-#     def __init__(self, hidden_size, intermediate_size, attention_heads, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.hidden_size = hidden_size
-#         self.intermediate_size = intermediate_size
-#         self.attention_heads = attention_heads
-#         self.attention = TransformerAttention(hidden_size, attention_heads)
-#         self.mlp = TransformerMLP(hidden_size, intermediate_size)
-
-#     def call(self, inputs, *args, **kwargs):
-#         return self.mlp(self.attention(inputs))
-
-#     def get_config(self):
-#         return super().get_config() | {
-#             "hidden_size": self.hidden_size,
-#             "intermediate_size": self.intermediate_size,
-#             "attention_heads": self.attention_heads
-#         }
 
 
 class TokenEmbedding(tf.keras.layers.Layer):
     def __init__(self, codebook_size, embedding_dim, **kwargs):
         super().__init__(**kwargs)
-        #these need to be easily accessed in the training loop
+
         self.codebook_size = codebook_size
         self.embedding_dim = embedding_dim
         self.codebook = self.add_weight("codebook", [codebook_size, embedding_dim], tf.float32, tf.keras.initializers.TruncatedNormal(0, 0.02))
@@ -147,8 +85,6 @@ class BiasLayer(tf.keras.layers.Layer):
 
 def create_maskgit(codebook_size, hidden_size, position_count, intermediate_size, transformer_heads, transformer_layers):
     def maskgit(tokens):
-        #def transformer_layer_done(): return transformer_layer(hidden_size, intermediate_size, transformer_heads)
-
         embed_layer = TokenEmbedding(codebook_size, hidden_size)
         #def transformer_layer(): return TransformerLayer(hidden_size, intermediate_size, transformer_heads)
         embed = embed_layer(tokens) + nb.embed(position_count, hidden_size)(tf.range(position_count)) # type: ignore
@@ -159,8 +95,9 @@ def create_maskgit(codebook_size, hidden_size, position_count, intermediate_size
         out = x\
             >> nb.dense(hidden_size, activation="gelu")\
             >> nb.layer_norm()\
-            >> embed_layer.compute_logits\
-            >> BiasLayer()
+            >> nb.dense(codebook_size, activation=None)
+            #>> embed_layer.compute_logits\
+            #>> BiasLayer()
         return out.get()
     return maskgit
 
@@ -243,13 +180,13 @@ class MaskGIT(tf.keras.Model):
     #         self._transformer_model.optimizer.minimize(loss, self._transformer_model.trainable_variables, tape)
     #     return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
 
-    def test_decode(self, input_tokens, decode_steps, sample=True):
+    def test_decode(self, input_tokens, decode_steps, generation_temperature):
         #[batch, positions]
         tokens = self.reshape_to_seq(input_tokens)
         token_logits = tf.zeros([tf.shape(input_tokens)[0], self.token_count, self.codebook_size])
         unknown_counts = tf.reduce_sum(tf.cast(tokens==MASK_TOKEN, tf.int32), -1)
         for i in range(decode_steps):
-            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, training=False, decode_steps=decode_steps, sample=sample)
+            write_mask, sampled_tokens, logits = self.decode_step(tokens, unknown_counts, i, decode_steps, generation_temperature)
             tokens = tf.where(write_mask, sampled_tokens, tokens)
             token_logits = tf.where(write_mask[:, :, tf.newaxis], logits, token_logits)
         return self.reshape_tokens_to_img(tokens), self.reshape_logits_to_img(token_logits)
@@ -261,15 +198,14 @@ class MaskGIT(tf.keras.Model):
     def mask_schedule(self, mask_ratio):
         return tf.math.cos(np.pi / 2 * mask_ratio)
 
-    def decode_step(self, tokens, initial_unknown_counts, step_i, training, decode_steps, sample=True):
+    def decode_step(self, tokens, initial_unknown_counts, step_i, decode_steps, generation_temperature):
         batch_size = tf.shape(tokens)[0]
         token_count = self.token_count
         #[batch, positions, tokens]
-        #breakpoint()
-        logits = self(tokens, training=training)
+        logits = self(tokens, training=False)
 
         unknown_tokens = tokens == MASK_TOKEN
-        if sample:
+        if generation_temperature != 0:
             sampled_tokens = tf.reshape(
                 tf.random.categorical(tf.reshape(logits, [batch_size * token_count, self.codebook_size]), num_samples=1, dtype=tf.int32),
                 [batch_size, token_count]
@@ -290,8 +226,8 @@ class MaskGIT(tf.keras.Model):
             mask_len = tf.maximum(step_i+1, tf.cast(tf.floor(tf.cast(initial_unknown_counts, tf.float32) * mask_ratio), tf.int32))
 
         confidence = tf.math.log(selected_probs)
-        if sample:
-            confidence += tfp.distributions.Gumbel(0, 1).sample(tf.shape(selected_probs)) * self.generation_temperature * (1 - ratio)
+        if generation_temperature != 0:
+            confidence += tfp.distributions.Gumbel(0, 1).sample(tf.shape(selected_probs)) * generation_temperature * (1 - ratio)
 
         thresholds = tf.gather(tf.sort(confidence, -1), mask_len[:, tf.newaxis], axis=-1, batch_dims=1)
 
@@ -299,9 +235,11 @@ class MaskGIT(tf.keras.Model):
 
         return write_mask, sampled_tokens, logits
 
+
     def test_decode_simple(self, input_tokens):
         logits = self.reshape_logits_to_img(self(self.reshape_to_seq(input_tokens), training=False))
         return tf.where(input_tokens==MASK_TOKEN, tf.argmax(logits, -1, tf.int32), input_tokens), logits
+
 
     def train_decode_simple(self, input_tokens, target_tokens):
         doing_prediction = input_tokens==MASK_TOKEN
@@ -316,6 +254,7 @@ class MaskGIT(tf.keras.Model):
         return self._transformer_model(inputs, training=training)
         #return self.decode_simple(inputs, training)[1]
         #return self.decode(inputs, training)[1]
+
 
     def train_step(self, data):
         batch_size = tf.shape(data)[0]
@@ -340,6 +279,7 @@ class MaskGIT(tf.keras.Model):
             'learning_rate':self._transformer_model.optimizer.learning_rate
         } | {m.name:m.result() for m in self._transformer_model.metrics}
 
+
     def test_step(self, data):
         batch_size = tf.shape(data)[0]
 
@@ -348,7 +288,7 @@ class MaskGIT(tf.keras.Model):
         mask_idx = tf.random.uniform([batch_size], 0, tf.shape(self.train_masks)[0], tf.int32)
         batch_masks = tf.gather(self.train_masks, mask_idx)
         sample_weights = self.sample_weights(batch_masks)
-        _, pred_logits = self.test_decode(self.mask_tokens(tokens, batch_masks), sample=False)
+        _, pred_logits = self.test_decode(self.mask_tokens(tokens, batch_masks), self.decode_steps, self.generation_temp)
         full_loss = nll_loss(tokens, pred_logits, sample_weights)
         full_accuracy = tf.reduce_mean(tf.metrics.sparse_categorical_accuracy(tokens, pred_logits))
 
@@ -366,25 +306,31 @@ class MaskGIT(tf.keras.Model):
             "simple_accuracy": simple_accuracy
         }
 
+
     @property
     def downscale_multiplier(self):
         return self._tokenizer.downscale_multiplier
+
 
     def get_masks(self, data_len):
         mask_idx = tf.range(data_len) % tf.shape(self.train_masks)[0]
         return tf.gather(self.train_masks, mask_idx)
 
+
     def to_tokens(self, img, training=False):
         return self._tokenizer.encode(img, training)
+
 
     def from_tokens(self, tokens, training=False):
         return self._tokenizer.decode(tokens, training)
 
+
     def decode_simple_img(self, tokens, training = False):
         return self.from_tokens(self.test_decode_simple(tokens)[0], training)
 
-    def decode_img(self, tokens, training = False):
-        return self.from_tokens(self.test_decode(tokens)[0], training)
+
+    def decode_img(self, tokens, decode_steps, generation_temperature, training = False):
+        return self.from_tokens(self.test_decode(tokens, decode_steps, generation_temperature)[0], training)
 
     @staticmethod
     def mask_tokens(tokens, mask):
@@ -436,31 +382,10 @@ def main(args):
             recreated = self.model.from_tokens(tokens_original)
 
             reconstructed_simple = self.model.decode_simple_img(tokens_masked)
-            reconstructed = self.model.decode_img(tokens_masked)
-            generated = self.model.decode_img(MASK_TOKEN * tf.ones_like(tokens_original))
+            reconstructed = self.model.decode_img(tokens_masked, decode_steps=12)
+            generated = self.model.decode_img(MASK_TOKEN * tf.ones_like(tokens_original), decode_steps=12)
             self.log.log_images("images", data).log_images("tokenizer_recreated", recreated).log_images("reconstruction_simple", reconstructed_simple)\
                 .log_images("reconstruction", reconstructed).log_images("generated_images", generated)
-
-            # wandb.log({
-            #     "images": [wandb.Image(d) for d in img],
-            #     "tokenizer_recreated": [wandb.Image(d) for d in recreated],
-            #     "reconstruction_simple": [wandb.Image(d) for d in reconstructed_simple],
-            #     "reconstruction":[wandb.Image(d) for d in reconstructed],
-            #     "generated_images": [wandb.Image(d) for d in generated]
-            # }, commit=False)
-
-
-
-
-
-    #tokenizer = VQVAEModel.load(get_tokenizer_fname())
-    # def prepare_dataset(img):
-    #     #tokens = tf.cast(tokenizer.encode(img), tf.int32)
-    #     #mask = tf.random.uniform(tf.shape(tokens)) < tf.random.uniform([tf.shape(tokens)[0], 1, 1])
-    #     return tf.where(mask, tf.cast(MASK_TOKEN, tf.int32), tokens), tokens, tf.where(mask, 1.0, 0.0)
-
-
-
 
     if not args.load_model:
         model = MaskGIT.new(args)

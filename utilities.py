@@ -4,11 +4,12 @@ import numpy as np
 from PIL import Image
 import tensorflow as tf
 
-import wandb
-
 #os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 
+
+
 def tf_init(use_gpu, threads, seed):
+    """Initialize tensorflow - Set the GPU to be used, the starting seed and available CPU threads"""
     gpus = tf.config.list_physical_devices("GPU")
     assert len(gpus) > use_gpu, "The requested GPU was not found"
 
@@ -19,63 +20,175 @@ def tf_init(use_gpu, threads, seed):
     tf.config.threading.set_intra_op_parallelism_threads(threads)
 
 
-def log_image(img):
-    return wandb.Image(img)
 
-def log_segmentation(img, mask):
-    return wandb.Image(img, masks={
-        "predictions":{
-            "mask_data":mask
-        }
-    })
+class LoadImagesGenerator:
+    """
+    Class for iterating over images in a directory
+    """
+    def __init__(self, glob_pattern, max_image_count = None):
+        """
+        Create the generator with the given glob pattern. Limit the number of images if requested.
+        """
+        self.images = glob.glob(glob_pattern)
+        if max_image_count is not None:
+            self.images = self.images[:max_image_count]
+
+    def __len__(self):
+        """
+        How many images can be loaded
+        """
+        return len(self.images)
+
+    def __iter__(self):
+        """
+        Iterate over all images
+        """
+        for fname in self.images:
+            yield open_image(fname)
+
+
+
+
 
 
 def open_image(fname):
+    """Open an image and convert it to floating point values"""
     return np.asarray(Image.open(fname)).astype("float") / 255.0
 
 def save_image(fname, image):
+    """Save the given image with the given filename"""
     Image.fromarray(image).save(fname)
 
 def load_images(pattern):
-    for fname in glob.glob(pattern):
-        yield open_image(fname)
+    """Generator that loads all images matching a given glob pattern"""
+    return LoadImagesGenerator(pattern)
 
-def load_images_place(data_dir, place, day="*"):
-    for fname in glob.glob(f"{data_dir}/{place}/{day}/*.jpg"):
-        yield open_image(fname)
+def load_images_place(data_dir, place, day="*", image_count_limit=None):
+    """Load images from a given place. Can limit the total amount if requested"""
+    return LoadImagesGenerator(f"{data_dir}/{place}/{day}/*.jpg", image_count_limit)
 
 def get_mask_dir(place):
+    """Get the directory for saving masks"""
     return f"masks/{place}"
 
 def get_time_mask_fname(place, time):
+    """Get a mask filename for the given time. This is used for saving images during segmentation."""
     return f"{get_mask_dir(place)}/{time:04d}_mask.png"
 
 def get_mask_fname(place):
+    """Get a segmentation mask filename for the given place. This mask will be used when creating datasets for training all models"""
     return f"{get_mask_dir(place)}_mask.png"
 
+def run_name_none(run_name):
+    """Return True if run_name is None or "" """
+    return run_name is None or run_name == ""
+
 def get_tokenizer_fname(run_name=None):
-    return "models/tokenizer" + ("" if run_name is None else f"_{run_name}")
+    """Get the filename of the VQVAE tokenizer model"""
+    return "models/tokenizer" + ("" if run_name_none(run_name) else f"_{run_name}")
 
 def get_maskgit_fname(run_name=None):
-    return "models/maskgit" + ("" if run_name is None else f"_{run_name}")
+    """Get the filename of the MaskGIT model"""
+    return "models/maskgit" + ("" if run_name_none(run_name) else f"_{run_name}")
 
 def get_sharpening_fname(run_name=None):
-    return "models/sharpen" + ("" if run_name is None else f"_{run_name}")
-
-
-# import random
-# a = glob.glob("brno/*/*.jpg")
-# random.shuffle(a)
-# print(np.var([np.asarray(Image.open(f))/255.0 for f in a[:100]]))
-
-
-#logger = log_and_save.WandbManager("image_outpainting")
-#logger.start({})
+    """Get the filename of the upscaling/sharpening diffusion model"""
+    return "models/sharpen" + ("" if run_name_none(run_name) else f"_{run_name}")
 
 
 
-#image_segmentation_based(load_images("brno", "20210312"))
-# mask = compute_final_mask("masks", "brno")
-# save_image(mask, "final_mask.png")
-# for img in islice(load_images("brno", "20210312"), 0, 281, 40):
-#     wandb.log({"final_mask":log_segmentation(img, mask)})
+class ProgressBar:
+    """
+    Prints a progress bar for a running operation
+    """
+
+    def __init__(self, total_steps, print_steps = 30):
+        """
+        Create a progress bar. Each time the `ProgressBar.step` method is called, progress will be printed.
+        
+        Step should be called `total_steps` times, and will print a total of `print_steps` progress characteds over the whole run
+        
+        The progress bar can be used as:
+        ```
+        with ProgressBar(...) as p:
+            for i in range(...):
+                p.step()
+        ```
+        Or, instead of the `with` block, the `start` and `end` methods can be called manually.
+        """
+        self.total_gen_steps = total_steps
+        self.total_print_steps = print_steps
+        self.gen_step = 0
+        self.print_step = 0
+
+    def step(self):
+        """
+        Perform one step, and print progress if necessary
+        """
+        self.gen_step += 1
+        #get the current print step - rescale gen_step to the range [0, print_step]
+        new_print_step = self.gen_step / self.total_gen_steps * self.total_print_steps
+
+        #if something new should be printed, do so
+        self.print_progress(int(new_print_step))
+
+    def print_progress(self, new_print_step):
+        """
+        Print progress if the print step has changed
+        """
+        diff = new_print_step - self.print_step
+        #print progress if the print step has changed enough
+        if diff != 0:
+            print ("#"*diff, flush=True, end="")
+        self.print_step += diff
+
+    def start(self):
+        """
+        Start the progress bar - print the starting and ending line
+        """
+        print (f"|{' '*self.total_print_steps}|" + '\b'*(self.total_print_steps+1), end="", flush=True)
+
+    def end(self):
+        """
+        End the progress bar - print the final line and a new line
+        """
+        self.print_progress(self.total_print_steps)
+        print("|", end="\n")
+
+    def __enter__(self):
+        """
+        Start the progress bar
+        """
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        End the progress bar
+        """
+        self.end()
+
+
+
+
+
+class GeneratorProgressBar(ProgressBar):
+    def __init__(self, generator, total_gen_steps = None, print_steps = 30):
+        """
+        Create a progress bar for a given generator. Each time an element is taken from the generator `ProgressBar(generator)`, progress will be printed.
+        
+        If total steps is None, generator must have a `__len__` function, denoting the number of elements it will produce
+        """
+        #if total_steps is None, try to get the generator length
+        super().__init__(total_gen_steps if total_gen_steps is not None else len(generator), print_steps)
+        self.generator = generator
+
+    def __iter__(self):
+        """
+        Produce elements from the generator while printing progress
+        """
+        self.start()
+        for x in self.generator:
+            yield x
+            self.step()
+        self.end()
