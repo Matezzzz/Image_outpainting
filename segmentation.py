@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--server", default="dyscalculia.ms.mff.cuni.cz", type=str, help="The server to download data from if not available offline")
 parser.add_argument("--username", default="matezzzz", type=str, help="The SSH username to use")
 parser.add_argument("--server_path", default="/projects/SkyGAN/webcams/chmi.cz/sky_webcams", type=str, help="The path to download data from")
-parser.add_argument("--dataset_location", default="data", type=str, help="Where data is stored locally")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 
 
 

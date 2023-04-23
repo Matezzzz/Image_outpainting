@@ -10,7 +10,8 @@ from log_and_save import WandbLog, TrainingLog
 from dataset import ImageLoading
 import tokenizer
 from tokenizer import VQVAEModel
-from utilities import get_tokenizer_fname, get_maskgit_fname, tf_init
+from utilities import get_tokenizer_fname, get_maskgit_fname
+from tf_utilities import tf_init
 from build_network import NetworkBuild as nb, NBTensor
 
 
@@ -33,8 +34,7 @@ parser.add_argument("--mask_ratio", default=0.5, type=float, help="Percentage of
 
 
 
-parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--load_model", default=False, type=bool, help="Whether to load a maskGIT model")
 
 
@@ -456,7 +456,7 @@ def main(args):
         model = MaskGIT.load(get_maskgit_fname())
 
     #create the train, dev and show datasets
-    image_load = ImageLoading(args.dataset_location, args.img_size, args.places)
+    image_load = ImageLoading(args.dataset_location, args.img_size)
     train_dataset, dev_dataset = image_load.create_train_dev_datasets(1000, args.batch_size)
     show_dataset = image_load.create_dataset(8)
 

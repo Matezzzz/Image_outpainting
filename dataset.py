@@ -4,71 +4,80 @@ import glob
 import re
 import random
 from pathlib import Path
+import gzip
 
 import tensorflow as tf
 from PIL import Image
 import numpy as np
-from keras.utils import dataset_utils
-
 
 from log_and_save import WandbLog
-from utilities import get_mask_fname, open_image
+from utilities import get_mask_fname, open_image, get_dataset_location
 
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--dataset_location", default="data", type=str, help="Where data is stored")
-parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--example_count", default=5, type=int, help="How many batches of size 8 to log")
 
 
 
 
-
 class ImageLoading:
-    ORDERED_MASKS_FILE = "data/masks.npy"
+    ORDERED_MASKS_FILE = "data/masks.npy.gz"
     FILENAME_DATASET_FILE = "data/filename_dataset.data"
 
 
     """Can load the dataset for multiple places and prepare the images for training"""
-    def __init__(self, dataset_location, dataset_image_size, places, scale_down = 4, stddev_threshold=0.04, shuffle_buffer=1024):
+    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, stddev_threshold=0.04, shuffle_buffer=1024):
         """Create a dataset with the given properties"""
-        masks, fname_dataset = self.index_dataset(dataset_location)
+        dataset_location = get_dataset_location(dataset_location)
+
+        
 
         #the size to resize images to during loading
         load_image_size = np.array([1200, 1600]) // scale_down
 
         #create the full image dataset
-        self.full_dataset = self._create_dataset(dataset_location, fname_dataset, load_image_size, dataset_image_size, stddev_threshold, shuffle_buffer)
+        self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, stddev_threshold, shuffle_buffer)
 
     @classmethod
-    def index_dataset(cls, dataset_location):
-        mask_fnames = glob.glob("masks/*_mask.png")
-        if not Path(cls.ORDERED_MASKS_FILE).exists() or not Path(cls.FILENAME_DATASET_FILE).exists():
-            ordered_masks = np.stack([open_image(fname, bool) for fname in mask_fnames], 0)
-            np.save(cls.ORDERED_MASKS_FILE, ordered_masks)
+    def _index_dataset(cls, dataset_location):
+        """Get masks for all locations and tuple of (associated mask index, filename) for every image in the dataset"""
 
+        #determine which locations to use based on the masks available
+        mask_fnames = sorted(glob.glob("masks/*_mask.png"))
+        #if indexing hasn't been computed before (or some part is missing)
+        if not Path(cls.ORDERED_MASKS_FILE).exists() or not Path(cls.FILENAME_DATASET_FILE).exists():
+            #load the masks and save them as a numpy array in alphabetical order
+            ordered_masks = np.stack([open_image(fname, bool) for fname in mask_fnames], 0)
+            masks_file = gzip.GzipFile(cls.ORDERED_MASKS_FILE, "w")
+            np.save(file=masks_file, arr=ordered_masks)
+            masks_file.close()
+
+            #find out all active locations (the ones that have a mask)
             regexp = re.compile("masks/(.*)_mask.png")
             locations = [regexp.match(mask).group(1) for mask in mask_fnames]
 
+            #find out which images are available for each location, save them and the index of the associated mask
             all_images = []
-
             for mask_i, location in enumerate(locations):
                 image_fnames = glob.glob(f"{location}/*/*.jpg", root_dir=dataset_location)
                 images_with_indices = [(fname, mask_i) for fname in image_fnames]
                 all_images.extend(images_with_indices)
+            #shuffle the order of all images in the dataset
             random.shuffle(all_images)
 
-            #image_fnames, mask_indices = list(zip(*all_images))
+            #save all image filenames as a gzip-compressed tensorflow dataset
             def generator():
                 for fname, mask_i in all_images:
                     yield fname, mask_i
-
             dataset = tf.data.Dataset.from_generator(generator, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string), tf.TensorSpec(shape=(), dtype=tf.int32)))
             dataset.save(cls.FILENAME_DATASET_FILE, "GZIP")
-        else:
-            ordered_masks = np.load(cls.ORDERED_MASKS_FILE)
-            dataset = tf.data.Dataset.load(cls.FILENAME_DATASET_FILE)
+
+        #we load everything from file just in case. Dataset cardinality can be computed correctly in this case, and it makes the behaviour the same as all subsequent runs
+        masks_file = gzip.GzipFile(cls.ORDERED_MASKS_FILE, 'r')
+        ordered_masks = np.load(file=masks_file)
+        dataset = tf.data.Dataset.load(cls.FILENAME_DATASET_FILE, compression="GZIP")
         return ordered_masks, dataset
 
     @staticmethod
@@ -85,14 +94,14 @@ class ImageLoading:
     @classmethod
     def _create_boxes(cls, mask, load_image_size, dataset_image_size):
         """Create image boxes that do not overlap the mask"""
-        mask = tf.image.resize
         #go over all positions, keep each where the box doesn't overlap with the mask
-        return np.array([
+        boxes = np.array([
             [y, x]
             for y in range(load_image_size[0] - dataset_image_size)
             for x in range(load_image_size[1] - dataset_image_size)
             if np.sum(mask[y:y+dataset_image_size, x:x+dataset_image_size]) == 0
         ])
+        return boxes
 
 
     @staticmethod
@@ -107,57 +116,65 @@ class ImageLoading:
         return img
 
 
-    def _create_place_dataset(self, dataset_location, place, load_image_size, box_image_size, stddev_threshold):
+    def _create_dataset_internal(self, dataset_location, fname_dataset, data_boxes, load_image_size, box_image_size, stddev_threshold):
         """Create the dataset for a given place"""
 
-        #get all possible image subsets that do not overlap with the mask
-        data_boxes = tf.constant(self._create_boxes(place, load_image_size, box_image_size))
-        assert len(data_boxes) > 0, "No boxes could be generated, mask is too restrictive"
+        width, height = load_image_size[1], load_image_size[0]
 
+        #load the image from a filename and select one random suitable area
+        def open_and_select_area(img_fname, mask_index):
+            #get the boxes that do not overlap with a mask for the given location
+            boxes = data_boxes[mask_index]
+            box_count = tf.shape(boxes)[0]
+            #if there are no boxes to choose from, return pure black - this will get filtered out in the delete_dark step
+            if box_count == 0:
+                return tf.zeros([box_image_size, box_image_size, 3])
 
-        #select one suitable area at random
-        def select_area(img):
-            box_i = tf.random.uniform([1], 0, len(data_boxes)-1, tf.int32)[0]
-            box_pos = data_boxes[box_i]
+            #load the image from the file
+            img = self.load_image(tf.strings.join([dataset_location, img_fname], separator="/"), width, height)
+            #select a box to select from the image
+            box_pos = boxes[tf.random.uniform([], maxval=box_count, dtype=tf.int32)]
+
+            #return the suitable area
             image = img[box_pos[0]:box_pos[0]+box_image_size, box_pos[1]:box_pos[1]+box_image_size] / 255.0
             image.set_shape((box_image_size, box_image_size, 3))
             return image
-            #return tf.data.Dataset.from_tensor_slices([img[a:a+box_image_size,b:b+box_image_size] / 255.0 for a, b in data_boxes])
 
         def delete_dark(img):
             return tf.reduce_mean(img) > 0.2
 
-        #return false if the image is too dark - used to filter out night images, or too monochrome
         def delete_monochrome(img):
             #mean color
             mean = tf.reduce_mean(img, (0, 1))
+            #average standard deviation
             stddev = tf.reduce_mean(tf.abs(img - mean))
-            return stddev > stddev_threshold
+            #keep all interesting images + 10% of the monochrome ones
+            return tf.logical_or(stddev > stddev_threshold, tf.random.uniform([]) < 0.1)
 
-        #return false if the image is too monochrome
-        #def delete_monochrome(img):
-        #    return tf.reduce_mean(tf.square(img-tf.reduce_mean(img, (1, 2), keepdims=True))) > variance_threshold
-
-        #get the paths of all images in the place directory
-        image_paths, _, _ = dataset_utils.index_directory(f"{dataset_location}/{place}", labels=None, formats=(".jpg",))
-
-        #create a dataset - load the image, select a suitable subset, delete dark images, then delete monochrome ones, then shuffle the rest
-        dataset = tf.data.Dataset.from_tensor_slices(image_paths)
-        width, height = load_image_size[1], load_image_size[0]
-        return dataset\
-            .map(lambda x:self.load_image(x, width, height), num_parallel_calls=tf.data.AUTOTUNE)\
-            .map(select_area)\
+        #go over all available images, select a random area from them, remove all dark images and most monochrome ones
+        return fname_dataset\
+            .map(open_and_select_area, num_parallel_calls=tf.data.AUTOTUNE)\
             .prefetch(tf.data.AUTOTUNE)\
             .filter(delete_dark)\
             .filter(delete_monochrome)
 
 
-    def _create_dataset(self, dataset_location, places, load_image_size, box_image_size, stddev_threshold, shuffle_buffer=1024):
+    def _create_dataset(self, dataset_location, load_image_size, box_image_size, stddev_threshold, shuffle_buffer=1024):
         """Create a dataset for multiple places"""
-        #create one dataset for each place
-        datasets = [self._create_place_dataset(dataset_location, place, load_image_size, box_image_size, stddev_threshold) for place in places]
-        #take one image from each dataset, and repeat until all are exhausted
-        dataset = tf.data.Dataset.choose_from_datasets(datasets, tf.data.Dataset.range(len(datasets)).repeat(), stop_on_empty_dataset=False)
+
+        #load all masks and image filenames
+        masks, fname_dataset = self._index_dataset(dataset_location)
+
+        print (f"Running with a dataset of {fname_dataset.cardinality()} images")
+
+        #resize each mask to the load_image_size
+        masks = [np.asarray(Image.fromarray(mask).resize((load_image_size[1], load_image_size[0]))) for mask in masks]
+        #generate suitable boxes for each mask, and convert them to a tf.constant
+        boxes = tf.ragged.constant([self._create_boxes(mask, load_image_size, box_image_size) for mask in masks])
+        #create the full dataset
+        dataset = self._create_dataset_internal(dataset_location, fname_dataset, boxes, load_image_size, box_image_size, stddev_threshold)
+
+        #shuffle if required
         if shuffle_buffer != 0:
             dataset = dataset.shuffle(shuffle_buffer)
         return dataset
@@ -174,7 +191,6 @@ class ImageLoading:
     def create_train_dev_datasets(self, dev_examples, batch_size):
         """Create a train and development datasets. First `dev_examples` images will go to the dev_dataset, the rest will go to the training one"""
         return self.batch(self.full_dataset.skip(dev_examples), batch_size), self.batch(self.full_dataset.take(dev_examples), batch_size)
-
 
     @staticmethod
     def image_mean(img, keepdims=False):
@@ -226,17 +242,10 @@ class ImageLoading:
 
 def main(args):
     #create a default dataset
-    dataset = ImageLoading(args.dataset_location, 128, args.places, stddev_threshold=0.04, shuffle_buffer=0).create_dataset(8)
+    dataset = ImageLoading(args.dataset_location, 128, stddev_threshold=0.04, shuffle_buffer=0).create_dataset(8)
 
     #log the first `args.example_count` batches to wandb
     WandbLog().wandb_init("image_outpainting_dataset", args)
-
-    #! 30% of images are black
-    #! at threshold =0.07, out of the remaining, 18% are not monochrome
-    #! 4 datasets -> 800 000 images -> * 0.7 * 0.18 / 16 batch size = only 6300 batches. Will change between epochs due to image bboxes changing
-    #lower threhsold should help
-
-
     for batch in islice(dataset.as_numpy_iterator(), args.example_count):
         WandbLog().log_images("dataset elements", batch).commit()
 

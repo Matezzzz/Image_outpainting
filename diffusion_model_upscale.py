@@ -8,7 +8,8 @@ import wandb
 from wandb.keras import WandbModelCheckpoint
 
 from tokenizer import VQVAEModel, parser as tokenizer_args_parser
-from utilities import get_tokenizer_fname, get_sharpening_fname, tf_init
+from utilities import get_tokenizer_fname, get_sharpening_fname
+from tf_utilities import tf_init
 from build_network import NetworkBuild as nb
 from log_and_save import WandbLog, TrainingLog
 from dataset import ImageLoading
@@ -32,8 +33,7 @@ parser.add_argument("--learning_rate", default=1e-3, type=float, help="Learning 
 parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay")
 
 
-parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--load_model_run", default="", type=str, help="Name of the wandb run that created the model to load")
 
 
@@ -331,7 +331,7 @@ def main(args):
     model = DiffusionModel.new(args)
 
     #create a train, development and show datasets
-    image_loading = ImageLoading(args.dataset_location, args.img_size, args.places, scale_down=1, shuffle_buffer=128)
+    image_loading = ImageLoading(args.dataset_location, args.img_size, scale_down=1, shuffle_buffer=128)
     train_dataset, dev_dataset = image_loading.create_train_dev_datasets(1000, args.batch_size)
     sharpen_dataset = image_loading.create_dataset(4)
 

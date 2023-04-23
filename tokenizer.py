@@ -8,18 +8,15 @@ from build_network import NetworkBuild as nb, NBTensor
 from dataset import ImageLoading
 from log_and_save import TrainingLog, WandbLog
 from wandb.keras import WandbModelCheckpoint
-from utilities import get_tokenizer_fname, tf_init
+from utilities import get_tokenizer_fname
+from tf_utilities import tf_init
 
-def none_or_str(value):
-    if value == 'None':
-        return None
-    return value
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--use_gpu", default=0, type=int, help="Which GPU to use. -1 to run on CPU.")
 parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
-parser.add_argument("--epochs", default=30, type=int, help="Number of epochs.")
+parser.add_argument("--epochs", default=5, type=int, help="Number of epochs.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
 
@@ -36,8 +33,7 @@ parser.add_argument("--discriminator_loss_weight", default=0.0, type=float, help
 parser.add_argument("--decoder_noise_dim", default=0, type=int, help="How many dimensions of loss to add before decoding")
 
 
-parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--load_model", default=False, type=bool, help="Whether to load model or not")
 
 
@@ -260,7 +256,7 @@ class VQVAEModel(tf.keras.Model):
 
         #decay rate = 0.75 each epoch (65634 batches of size 64)
         self._model.compile(
-            tf.optimizers.Adam(tf.optimizers.schedules.ExponentialDecay(1e-3, 65634, 0.75)), # type: ignore
+            tf.optimizers.Adam(tf.optimizers.schedules.ExponentialDecay(1e-3, 65634, 0.75)),
             scaled_mse_loss
         )
 
@@ -410,7 +406,7 @@ class VQVAEModel(tf.keras.Model):
         """
         Convert the given tokens back to an image
         """
-        return self._decode_model(self._quantizer.get_embedding(tokens), training=training) #type: ignore
+        return self._decode_model(self._quantizer.get_embedding(tokens), training=training)
 
     def get_config(self):
         return super().get_config() | {
@@ -451,7 +447,7 @@ def main(args):
         model = VQVAEModel.load(get_tokenizer_fname(), args)
 
     #load the base dataset
-    image_load = ImageLoading(args.dataset_location, args.img_size, args.places)
+    image_load = ImageLoading(args.dataset_location, args.img_size)
 
     #create train/dev/show datasets
     train_dataset, dev_dataset = image_load.create_train_dev_datasets(1000, args.batch_size)
@@ -465,7 +461,7 @@ def main(args):
 
     #train the model
     model.fit(train_dataset, epochs=args.epochs, callbacks=[
-        WandbModelCheckpoint(get_tokenizer_fname(wandb.run.name), "reconstruction_loss", save_freq=2500), #type: ignore
+        WandbModelCheckpoint(get_tokenizer_fname(wandb.run.name), "reconstruction_loss", save_freq=2500),
         model_log]
     )
 

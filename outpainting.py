@@ -6,7 +6,8 @@ import numpy as np
 import tensorflow as tf
 
 
-from utilities import get_maskgit_fname, tf_init, get_sharpening_fname, GeneratorProgressBar
+from utilities import get_maskgit_fname, get_sharpening_fname, GeneratorProgressBar
+from tf_utilities import tf_init
 from maskgit import MaskGIT, MASK_TOKEN
 from dataset import ImageLoading
 from log_and_save import WandbLog
@@ -43,8 +44,7 @@ parser.add_argument("--outpaint_step", default=0.5, type=float, help="The step t
 
 
 
-parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
+parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 
 
 
@@ -331,7 +331,7 @@ def main(args):
     upscaling_model = DiffusionModel.load(get_sharpening_fname(args.sharpen_run)) if args.generate_upsampled else None
 
     #load the image dataset with a given batch size
-    dataset = ImageLoading(args.dataset_location, args.img_size, args.places, stddev_threshold=0.1).create_dataset(args.batch_size)
+    dataset = ImageLoading(args.dataset_location, args.img_size, stddev_threshold=0.1).create_dataset(args.batch_size)
 
     #start wandb for logging
     WandbLog.wandb_init("image_outpainting_results", args)

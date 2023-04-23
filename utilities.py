@@ -1,23 +1,11 @@
 import glob
+import os
 
 import numpy as np
 from PIL import Image
-import tensorflow as tf
 
 #os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Report only TF errors by default
 
-
-
-def tf_init(use_gpu, threads, seed):
-    """Initialize tensorflow - Set the GPU to be used, the starting seed and available CPU threads"""
-    gpus = tf.config.list_physical_devices("GPU")
-    assert len(gpus) > use_gpu, "The requested GPU was not found"
-
-    tf.config.set_visible_devices((gpus[use_gpu] if use_gpu != -1 else []), "GPU")
-
-    tf.keras.utils.set_random_seed(seed)
-    tf.config.threading.set_inter_op_parallelism_threads(threads)
-    tf.config.threading.set_intra_op_parallelism_threads(threads)
 
 
 
@@ -49,7 +37,15 @@ class LoadImagesGenerator:
 
 
 
-
+def get_dataset_location(args_location):
+    """Get dataset location - return args_location if specified, the value of the IMAGE_OUTPAINTING_DATASET_LOCATION environment variable otherwise"""
+    if args_location == "":
+        loc = os.getenv("IMAGE_OUTPAINTING_DATASET_LOCATION")
+        #if location is not specified in any way, raise an error
+        if loc is None:
+            raise RuntimeError("Dataset location not set")
+        return loc
+    return args_location
 
 def open_image(fname, dtype=float):
     """Open an image and convert it to the given type if needed. Types "float" and "bool" are supported"""
@@ -58,8 +54,7 @@ def open_image(fname, dtype=float):
         return img.astype("float") / 255.0
     if dtype == bool:
         return img != 0
-    else:
-        raise NotImplementedError("Other dtypes not supported")
+    raise NotImplementedError("Other dtypes not supported")
 
 def save_image(fname, image):
     """Save the given image with the given filename"""
