@@ -33,8 +33,7 @@ parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight dec
 
 
 parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno"], nargs="+", type=str, help="Individual places to use data from")
-
+parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
 parser.add_argument("--load_model_run", default="", type=str, help="Name of the wandb run that created the model to load")
 
 
@@ -55,7 +54,7 @@ EMBEDDING_MAX_FREQUENCY = 1000.0
 def sinusoidal_embedding(img_size, embedding_dims):
     """Return a function that computes a sinusoidal embedding"""
     # The frequencies of individual embedding components will be a geometric row
-    frequencies = tf.experimental.numpy.geomspace(EMBEDDING_MIN_FREQUENCY, EMBEDDING_MAX_FREQUENCY, embedding_dims//2)
+    frequencies = tf.experimental.numpy.geomspace(EMBEDDING_MIN_FREQUENCY, EMBEDDING_MAX_FREQUENCY, embedding_dims//2, dtype=tf.float32)
     # Legacy way of computing frequencies
     # frequencies = tf.exp(tf.linspace(tf.math.log(EMBEDDING_MIN_FREQUENCY), tf.math.log(EMBEDDING_MAX_FREQUENCY), embedding_dims // 2))
     angular_speeds = 2.0 * math.pi * frequencies
@@ -78,6 +77,7 @@ EDGE_MEAN = np.array([0.00114195, -0.00257778,  0.00122407], np.float32)
 EDGE_VARIANCE = np.array([0.00015055, 0.00013764, 0.00014862], np.float32)
 
 # Code at https://keras.io/examples/generative/ddim/ was used as a starting point for this model
+# pylint: disable=abstract-method
 class DiffusionModel(tf.keras.Model):
     """Runs a diffusion model that is able to upscale images without losing detail"""
     def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, learning_rate, weight_decay, train_batch_size, batch_size, *args, **kwargs):
@@ -153,10 +153,10 @@ class DiffusionModel(tf.keras.Model):
         # convert angles to noise_rates & signal_rates
         return tf.sin(diffusion_angles), tf.cos(diffusion_angles)
 
-    def call(self, inputs, training=None, mask=None):
-        """Call the model"""
-        # Could use the _ema_model here if training was unstable
-        return self(inputs, training=training)
+    # def call(self, inputs, training=None, mask=None):
+    #     """Call the model"""
+    #     # Could use the _ema_model here if training was unstable
+    #     return super().__call__(inputs, training=training)
 
     def denoise(self, blurry_image, noisy_image, noise_rates, signal_rates, training) -> tuple[tf.Tensor, tf.Tensor]:
         """Perform one denoising step on the given image"""
@@ -185,7 +185,7 @@ class DiffusionModel(tf.keras.Model):
 
             # use the network to estimate the signal and noise in the current image
             diffusion_times = tf.ones([batch_size]) - step * step_size
-            noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
+            noise_rates, signal_rates = self._diffusion_schedule(diffusion_times)
             pred_noises, pred_image = self.denoise(blurry_image, noisy_image, noise_rates, signal_rates, training=False)
 
             #if we have a target (i.e. some target values are already known), use them in place of the predicted image
@@ -194,7 +194,7 @@ class DiffusionModel(tf.keras.Model):
 
             # get the next noise and signal rates, and remove a slight amount of the predicted noise from the image so the rates fit in the next iteration
             next_diffusion_times = diffusion_times - step_size
-            next_noise_rates, next_signal_rates = self.diffusion_schedule(next_diffusion_times)
+            next_noise_rates, next_signal_rates = self._diffusion_schedule(next_diffusion_times)
             next_noisy_image = next_signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_image + next_noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * pred_noises
         #return the image predicted during the last iteration
         return pred_image
@@ -206,13 +206,13 @@ class DiffusionModel(tf.keras.Model):
         #create initial noise from which we will create the new edges using the model
         initial_noise = tf.random.normal(shape=tf.shape(blurry_images))
         #normalize blurry images
-        blurry_images_norm = self.normalize_image(blurry_images)
+        blurry_images_norm = self._normalize_image(blurry_images)
         #the image we want to get, if known - e.g. if some parts of edges are finished already, and we are only working on part of the image
-        target_edges = self.normalize_edges(target_image - blurry_images) if target_image is not None else None
+        target_edges = self._normalize_edges(target_image - blurry_images) if target_image is not None else None
         #use the model to predict the new edges
         edges = self.reverse_diffusion(blurry_images_norm, initial_noise, diffusion_steps, mask, target_edges)
         #denormalize the edges and add them to the image
-        return tf.clip_by_value(blurry_images + self.denormalize_edges(edges), 0.0, 1.0)
+        return tf.clip_by_value(blurry_images + self._denormalize_edges(edges), 0.0, 1.0)
 
     def improve_images_test(self, ideal_images, diffusion_steps):
         """Blur images, then improve them, and return both"""
@@ -317,6 +317,7 @@ class DiffusionModel(tf.keras.Model):
             "train_batch_size":self.train_batch_size,
             "batch_size": self.batch_size
         }
+# pylint: enable=abstract-method
 
 
 
@@ -377,5 +378,5 @@ def main(args):
 
 
 if __name__ == "__main__":
-    given_arguments = parser.parse_args([] if "__file__" not in globals() else None)
-    main(given_arguments)
+    _args = parser.parse_args([] if "__file__" not in globals() else None)
+    main(_args)

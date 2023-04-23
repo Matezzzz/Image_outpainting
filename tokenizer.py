@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--use_gpu", default=0, type=int, help="Which GPU to use. -1 to run on CPU.")
 parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
-parser.add_argument("--epochs", default=10, type=int, help="Number of epochs.")
+parser.add_argument("--epochs", default=30, type=int, help="Number of epochs.")
 parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
 
@@ -33,11 +33,11 @@ parser.add_argument("--embedding_loss_weight", default=0.05, type=float, help="S
 parser.add_argument("--commitment_loss_weight", default=0.02, type=float, help="Scale for the commitment loss (penalize changing embeddings)")
 parser.add_argument("--entropy_loss_weight", default=0.01, type=float, help="Scale for the entropy loss")
 parser.add_argument("--discriminator_loss_weight", default=0.0, type=float, help="Scale for the discriminator loss")
-parser.add_argument("--decoder_noise_dim", default=10, type=int, help="How many dimensions of loss to add before decoding")
+parser.add_argument("--decoder_noise_dim", default=0, type=int, help="How many dimensions of loss to add before decoding")
 
 
 parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
+parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
 parser.add_argument("--load_model", default=False, type=bool, help="Whether to load model or not")
 
 
@@ -355,14 +355,14 @@ class VQVAEModel(tf.keras.Model):
         """
 
         #support loading old models with a missing value in their config
-        # def vqvae_load_old(*args2, **kwargs):
-        #     #if the decoder_noise_dim parameters is missing, set it to the default value
-        #     if "decoder_noise_dim" not in kwargs:
-        #         kwargs["decoder_noise_dim"] = args.decoder_noise_dim
-        #     return VQVAEModel(*args2, **kwargs)
+        def vqvae_load_old(*args2, **kwargs):
+            #if the decoder_noise_dim parameters is missing, set it to the default value
+            if "decoder_noise_dim" not in kwargs:
+                kwargs["decoder_noise_dim"] = args.decoder_noise_dim
+            return VQVAEModel(*args2, **kwargs)
 
         #load the model
-        vqvae_old = tf.keras.models.load_model(fname)#, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss})
+        vqvae_old = tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss})
         #return vqvae_old
 
         # code that can help with loading problems
@@ -471,5 +471,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    _cmdline_args = parser.parse_args([] if "__file__" not in globals() else None)
-    main(_cmdline_args)
+    main(parser.parse_args([] if "__file__" not in globals() else None))

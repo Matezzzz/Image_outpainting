@@ -29,7 +29,7 @@ class LoadImagesGenerator:
         """
         Create the generator with the given glob pattern. Limit the number of images if requested.
         """
-        self.images = glob.glob(glob_pattern)
+        self.images = sorted(glob.glob(glob_pattern))
         if max_image_count is not None:
             self.images = self.images[:max_image_count]
 
@@ -51,9 +51,15 @@ class LoadImagesGenerator:
 
 
 
-def open_image(fname):
-    """Open an image and convert it to floating point values"""
-    return np.asarray(Image.open(fname)).astype("float") / 255.0
+def open_image(fname, dtype=float):
+    """Open an image and convert it to the given type if needed. Types "float" and "bool" are supported"""
+    img = np.asarray(Image.open(fname))
+    if dtype == float:
+        return img.astype("float") / 255.0
+    if dtype == bool:
+        return img != 0
+    else:
+        raise NotImplementedError("Other dtypes not supported")
 
 def save_image(fname, image):
     """Save the given image with the given filename"""
@@ -63,21 +69,13 @@ def load_images(pattern):
     """Generator that loads all images matching a given glob pattern"""
     return LoadImagesGenerator(pattern)
 
-def load_images_place(data_dir, place, day="*", image_count_limit=None):
+def load_images_place(data_dir, place, day="*", time="*", image_count_limit=None):
     """Load images from a given place. Can limit the total amount if requested"""
-    return LoadImagesGenerator(f"{data_dir}/{place}/{day}/*.jpg", image_count_limit)
-
-def get_mask_dir(place):
-    """Get the directory for saving masks"""
-    return f"masks/{place}"
-
-def get_time_mask_fname(place, time):
-    """Get a mask filename for the given time. This is used for saving images during segmentation."""
-    return f"{get_mask_dir(place)}/{time:04d}_mask.png"
+    return LoadImagesGenerator(f"{data_dir}/{place}/{day}/{time}.jpg", image_count_limit)
 
 def get_mask_fname(place):
     """Get a segmentation mask filename for the given place. This mask will be used when creating datasets for training all models"""
-    return f"{get_mask_dir(place)}_mask.png"
+    return f"masks/{place}_mask.png"
 
 def run_name_none(run_name):
     """Return True if run_name is None or "" """

@@ -34,7 +34,7 @@ parser.add_argument("--mask_ratio", default=0.5, type=float, help="Percentage of
 
 
 parser.add_argument("--dataset_location", default="data", type=str, help="Directory to read data from")
-parser.add_argument("--places", default=["brno"], type=list[str], help="Individual places to use data from")
+parser.add_argument("--places", default=["brno", "belotin", "ceske_budejovice", "cheb"], nargs="+", type=str, help="Individual places to use data from")
 parser.add_argument("--load_model", default=False, type=bool, help="Whether to load a maskGIT model")
 
 
@@ -188,7 +188,7 @@ class MaskGIT(tf.keras.Model):
 
     def test_decode(self, input_tokens, decode_steps, generation_temperature):
         """Use the model to generate masked tokens using multiple steps and given generation temperature"""
-        tokens = self.reshape_to_seq(input_tokens)
+        tokens = self._reshape_to_seq(input_tokens)
         #final token logits
         token_logits = tf.zeros([tf.shape(input_tokens)[0], self.token_count, self.codebook_size])
         #how many masked tokens are present in each input
@@ -200,7 +200,7 @@ class MaskGIT(tf.keras.Model):
             #save the tokens and logits generated during the current step
             tokens = tf.where(write_mask, sampled_tokens, tokens)
             token_logits = tf.where(write_mask[:, :, tf.newaxis], logits, token_logits)
-        return self.reshape_tokens_to_img(tokens), self._reshape_logits_to_img(token_logits)
+        return self._reshape_tokens_to_img(tokens), self._reshape_logits_to_img(token_logits)
 
     @property
     def token_count(self):
@@ -240,7 +240,7 @@ class MaskGIT(tf.keras.Model):
         #how far in the generation process are we
         ratio = (step_i + 1.0) / decode_steps
         #what part of the tokens should be masked after this step finishes
-        mask_ratio = self.mask_schedule(ratio)
+        mask_ratio = self._mask_schedule(ratio)
 
         #if this is the last step, we need to generate all the remaining tokens - 0 will remain masked
         if step_i == decode_steps-1:
@@ -472,5 +472,5 @@ def main(args):
 
 
 if __name__ == "__main__":
-    _given_args = parser.parse_args([] if "__file__" not in globals() else None)
-    main(_given_args)
+    _args = parser.parse_args([] if "__file__" not in globals() else None)
+    main(_args)

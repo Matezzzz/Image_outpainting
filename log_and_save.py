@@ -12,14 +12,26 @@ class WandbLog:
         self.log = {}
 
     @staticmethod
-    def wandb_init(project, args):
+    def wandb_init(project, args, ok_already_initialized = False):
         """Initialize Wandb. Must be called once before any logs are created"""
+        if wandb.run is not None:
+            if ok_already_initialized:
+                return
+            raise RuntimeError("Wandb is already initialized")
         wandb.init(project=project, config=args)
         wandb.run.log_code(".")
 
     def log_image(self, name, image):
         """Log one image to wandb"""
         self.log[name] = wandb.Image(image)
+        return self
+
+    def log_segmentation(self, name, image, segmentation, class_labels=None):
+        """Log a segmented image to wandb"""
+        self.log[name] = wandb.Image(image, masks={
+            "predictions":{
+                "mask_data":segmentation} | ({} if class_labels is None else dict(enumerate(class_labels)))
+        })
         return self
 
     def log_images(self, name, images):

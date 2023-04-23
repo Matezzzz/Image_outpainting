@@ -6,9 +6,9 @@ import wandb
 parser = argparse.ArgumentParser()
 
 
-parser.add_argument("--artifact_path", default="matezzzz/image_outpainting_maskgit/run_xk236zct_model", type=str, help="The artifact to delete")
-parser.add_argument("--delete_from", default=0, type=int, help="The version from which to start deleting")
-parser.add_argument("--delete_to", default=0, type=int, help="The last version to delete")
+parser.add_argument("--artifact_path", default="matezzzz/image_outpainting_sharpen/run_0wj74hbm_model", type=str, help="The artifact to delete")
+parser.add_argument("--delete_from", default=80, type=int, help="The version from which to start deleting")
+parser.add_argument("--delete_to", default=220, type=int, help="The last version to delete")
 parser.add_argument("--keep_each", default=20, type=int, help="Keep each version where (ver % keep_each) == 0")
 
 
