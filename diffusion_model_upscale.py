@@ -125,7 +125,10 @@ class DiffusionModel(tf.keras.Model):
     def _blur_images(self, images):
         """Take images, downscale them, pass them through the tokenizer, then upscale them back"""
         tok_img_s = self._tokenizer.img_size
-        return tf.image.resize(self._tokenizer(tf.image.resize(images, [tok_img_s, tok_img_s])), [self.img_size, self.img_size], tf.image.ResizeMethod.BICUBIC)
+        downscaled = tf.image.resize(images, [tok_img_s, tok_img_s])
+        tok_output = tf.clip_by_value(self._tokenizer(downscaled), 0.0, 1.0)
+        upscaled = tf.image.resize(tok_output, [self.img_size, self.img_size], tf.image.ResizeMethod.BICUBIC)
+        return upscaled
 
     def _normalize_image(self, images):
         """Normalize image - move it so that the whole dataset has zero mean and unit variance"""

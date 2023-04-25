@@ -11,10 +11,15 @@ from PIL import Image
 import numpy as np
 
 from log_and_save import WandbLog
-from utilities import get_mask_fname, open_image, get_dataset_location
+from utilities import open_image, get_dataset_location
+from tf_utilities import tf_init
 
 
 parser = argparse.ArgumentParser()
+
+parser.add_argument("--use_gpu", default=-1, type=int, help="Which GPU to use. -1 to run on CPU.")
+parser.add_argument("--seed", default=42, type=int, help="Random seed.")
+parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
 
 parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--example_count", default=5, type=int, help="How many batches of size 8 to log")
@@ -28,17 +33,16 @@ class ImageLoading:
 
 
     """Can load the dataset for multiple places and prepare the images for training"""
-    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, stddev_threshold=0.04, shuffle_buffer=1024):
+    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, stddev_threshold=0.05, shuffle_buffer=1024):
         """Create a dataset with the given properties"""
         dataset_location = get_dataset_location(dataset_location)
-
-        
 
         #the size to resize images to during loading
         load_image_size = np.array([1200, 1600]) // scale_down
 
         #create the full image dataset
         self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, stddev_threshold, shuffle_buffer)
+
 
     @classmethod
     def _index_dataset(cls, dataset_location):
@@ -80,16 +84,6 @@ class ImageLoading:
         dataset = tf.data.Dataset.load(cls.FILENAME_DATASET_FILE, compression="GZIP")
         return ordered_masks, dataset
 
-    @staticmethod
-    def _get_mask(place, load_image_size):
-        """Load a mask for the given place. Print an error if it is not available."""
-        try:
-            img = Image.open(get_mask_fname(place))
-        except FileNotFoundError:
-            print ("Mask could not be loaded. Create it for the given place using the segmentation.py file.")
-            raise
-        #convert the mask to a numpy array
-        return np.asarray(img.resize((load_image_size[1], load_image_size[0])))
 
     @classmethod
     def _create_boxes(cls, mask, load_image_size, dataset_image_size):
@@ -241,8 +235,11 @@ class ImageLoading:
 
 
 def main(args):
+    tf_init(args.use_gpu, args.threads, args.seed)
+
     #create a default dataset
-    dataset = ImageLoading(args.dataset_location, 128, stddev_threshold=0.04, shuffle_buffer=0).create_dataset(8)
+    dataset = ImageLoading(args.dataset_location, 128, stddev_threshold=0.05, shuffle_buffer=0).create_dataset(8)
+
 
     #log the first `args.example_count` batches to wandb
     WandbLog().wandb_init("image_outpainting_dataset", args)
@@ -251,4 +248,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(parser.parse_args([]))
+    main(parser.parse_args())
