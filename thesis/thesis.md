@@ -70,17 +70,9 @@ Originally introduced in the field of natural language processing [REF] as a suc
 
 
 ....
-
-### VQVAE?
-
-
-### MaskGIT
-
-
-### Diffusion models
-
-
-
+! neural networks as computational graphs? (meaning how to visualize the process)
+! embeddings?
+! diffusion models
 
 ## The Algorithm
 
@@ -93,6 +85,7 @@ During outpainting, we use the models as follows - first, we get the image we ar
 We will start by describing the dataset used to train the models. After that, we will show how every model is trained, and finally, we will show the details of how they work together during the outpainting process.
 
 [IMAGE DETAILING THE PROCESS?]
+
 
 ### Dataset
 
@@ -140,25 +133,93 @@ Although we eliminate quite a large chunk of the training data during this step,
 
 In this section, we describe all the models that will be used in the outpainting algorithm, how they are trained, and their results.
 
+
 #### Tokenizer
 
-The tokenizer is responsible for taking in images and converting them to a latent space consisting of discrete tokens. The architecture is based on the vector quantization variational autoencoder [REF] and consists of three parts - an encoder, the vector quantization layer, and a decoder. The encoder takes images as an input, processing them using multiple residual blocks and downscaling convolutions, and outputs a downscaled image of embedding vectors in an embedding space. The vector quantization layer then takes the vectors in embedding space, and attempts to represent each of them using a discrete token, then it converts the tokens back to the embedding space. The decoder then uses more residual layers and transposed convolutions to attempt to reconstruct the original image from the vectors in the embedding space. We describe the architecture and training process of all model parts in this section.
+The tokenizer is responsible for taking in images and converting them to a latent space consisting of discrete tokens. The architecture is based on the vector quantization variational autoencoder [REF] and consists of three parts - an encoder, the vector quantization layer, and a decoder. The encoder takes images as an input, processing them using multiple residual blocks and downscaling convolutions, and outputs a downscaled image of embedding vectors in an embedding space. The vector quantization layer then takes the vectors in embedding (or latent) space, and attempts to represent each of them using a discrete token, then it converts the tokens back to the embedding space. The decoder then uses more residual layers and transposed convolutions to attempt to reconstruct the original image from the vectors in the embedding space. Our variant of the VQVAE trains on images of size 128x128 and uses a latent space of dimensions 32x23. We describe the architecture and training process of all model parts in this section.
+
+In the description of both the encoder and decoder, we use the following residual block with different variants for downscaling, upscaling and changing the number of filters:
+
+[RESIDUAL BLOCK IMAGE]
 
 
+The encoder then uses the following architecture:
 
-The encoder 
+[ENCODER ARCHITECTURE IMAGE]
+
+Resulting in a 4-times downscale, and outputting a 32 by 32 image of vectors in the embedding space.
+
+
+The vector quantization layer is then responsible for converting the vectors in the embedding space to discrete tokens. It does this by having a codebook, where each token is represented by a vector in the latent space. When converting encoder outputs to tokens, we simply take the closest vector in the codebook according to the L2 metric and use the associated token, and during the conversion back, we replace each token with the vector from the codebook. To be able to train the network using backpropagation, we need to be able to compute the gradient of the loss relative to the layer inputs when provided with the gradient of the outputs. Thankfully, albeit our layer is not differentiable, as both the layer inputs and outputs share the same embedding space, VQVAE proposes to copy the gradient from output to input, propagating useful information and enabling the model to be trained.
+
+
+The decoder uses an architecture similar to the encoder, just using upscaling convolutions instead of downscaling ones:
+
+[DECODER ARCHITECTURE IMAGE]
+
+Creating an image of the same size as the input.
+
+
+Using the terminology from VQVAE ($x$ is the model input, $z_e(x)$ is the encoder output, $z_q(x)$ is the vector quantization layer output), we train the model using the following loss:
+
+$$L = K\log p(x|z_q(x)) + \alpha ||sg(z_e(x)) - e||_2^2 + \beta ||z_e(x) - sg(e)||_2^2 + \gamma c_t ||e_t - v_t||_2^2$$
+
+The first three terms are from the VQVAE article, their rationale is as follows:
+ * $K\log p(x|z_q(x))$ - The reconstruction loss multiplied by a constant, $K$. When we interpret the model outputs as means of a normal distribution for each pixel, this term can be derived to be equal to the mean squared error between decoder outputs and encoder inputs, multiplied by a constant, $K$, which we set to the inverse of the variance in the input data, $K=1/Var(x)$.
+ * $\alpha ||sg(z_e(x)) - e||_2^2$ - The VQVAE embedding loss. Using the stop gradient $sg$ operator, it changes the codebook vectors in the vector quantization layer to be closer to encoder outputs.
+ * $\beta ||z_e(x) - sg(e)||_2^2$ - VQVAE commitment loss. Attempts to move encoder predictions closer to embedding vectors in order to increase training stability.
+
+We found that the original VQVAE tended to leave some vectors unused, leaving potential generation quality on the table. For this reason, we introduce the following loss: $\gamma \sum_{t \in T} c_t ||e_t - v_t||_2^2$. Going over all VQVAE tokens $T$, $c_t$ is $1$ if the token was used for embedding the last batch, $0$ otherwise. $e_t$ is the closest encoder result vector from the last batch, and $v_t$ is the token embedding in the codebook. The loss moves unused embedding vectors closer to encoder outputs in the last step, increasing their chance of being used the next time.
+
+In the following sections, we use the following terminology: Using the tokenizer/encoder for conversion to tokens means applying the encoder and the first part of the VQ layer. Analogously, using the decoder to convert tokens to image means embedding the tokens using VQ, and using the decoder to get an image.
 
 
 
 #### MaskGIT
+
+The masked generative transformer model [REF] is responsible for doing outpainting on tokens - given an image with half or a quarter of its' tokens masked out, it is able to replace the hidden tokens with ones that complete the image in a feasible way. We base our model structure on the original MaskGIT article, and only slightly modify the training process. We first describe the model architecture, how we use it when generating masked tokens, and finally, how we train it.
+
+The MaskGIT architecture is greatly inspired by BERT [REF] from the area of NLP, just generalized for images. It takes an array of tokens as an input, some of which may be replaced with a special symbol, *MASK_TOKEN*, to signify that the model should try to predict the token in this place, and outputs, for each place, a set of logits, each one corresponding to a token from the tokenizer codebook.
+
+The exact architecture used is as follows:
+
+[MASKGIT MODEL ARCHITECTURE]
+
++embedding description?
+
+
+We now continue by describing the way new tokens are generated, the process used is the same as in the original article, but we provide a brief summary. In theory, the model would be able to generate all tokens in a single pass, but we can get samples of a much better quality if we allow multiple generation steps. We use the cosine mask scheduling function $\gamma(x) = cos(2*pi*x)$ from the original article and set the *decode_steps* and *generation_temperature* parameters, specifying how many times we call the model when generating the image and how creative should the model be when guessing tokens respectively.  Starting with an input token array where some tokens are equal to *MASK_TOKEN*, we run the following algorithm:
+
+$N =$ number of unknown tokens in input tokens
+
+For $t = 1$ to *decode_steps*:
+* Use the MaskGIT model to predict masked token logits. If we already know a token, we replace it's logit with infinity.
+* For each position, compute softmax over all logits to obtain token probabilities. Sample one token at random for every position - because we set the token logit to infinity, this will preserve the input tokens.
+* Compute the number of tokens that should be masked after this step, $K=\gamma(\frac{t}{decode\_steps}) * N$
+* We obtain confidence values by adding logits corresponding to the sampled tokens and random values from the gumbel distribution with scale equal to *generation_temperature*.
+* We take the $K$ lowest confidence values and replace their values in sampled tokens with the MASK_TOKEN. Then, we set the input tokens for the next step to sampled tokens.
+
+When the cycle finishes, we are left with the newly created tokens.
+
+During outpainting, we generally know a part of the columns or rows in the input token image, and need to generate the tokens adjacent to them. As this is the only thing we will use the model for, we incorporate it into the training process, modifying the original MaskGIT. We define a *mask_ratio* constant, defining the percentage of rows/columns that will be masked. During outpainting, we either know the unmasked rows/columns, or we know both, and the only missing part is one corner. Based on this, we define training masks, 8 in total, describing all possible usages of the model - the first four have masked columns on the right/left and masked rows on top/bottom. The remaining four have a single corner masked out.
+
+We modify the training process to use our training masks as follows:
+
+* We sample a ratio $t$ between 0 and 1
+* Using the cosine scheduling function from the section above, we obtain a *mask ratio* $= \gamma(t)$
+* We take an image, keep all tokens that are marked as unmasked in the training mask. We mask all other tokens with probability *mask_ratio*.
+* We minimize the negative log likelihood of the masked tokens.
+
 
 
 
 
 #### Diffusion model upscaler
 
+Because the tokenizer tends to lose some details when decoding from tokens, we use an upscaling model loosely based on [REF] to add details to the final image and upscale it. For this, we use a diffusion model, which we train on the task of generating edges - values which should be added to the blurry image in order to generate a sharp version. We describe the architecture of the model here, and how it is trained.
+
+The model inputs are the blurred 512x512 images, the ratio of the noise component relative to the signal as a sinusoidal embedding, and the edges, with a noise component added. We train the model to predict the noise component in generated edges. The architecture we use is based on U-Net [REF], and it uses the same residual blocks as the tokenizer for encoding / decoding. 
 
 
 
-!!! tokenizer linear output + squish
 
