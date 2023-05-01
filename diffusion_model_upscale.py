@@ -25,7 +25,7 @@ parser.add_argument("--seed", default=42, type=int, help="Random seed.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
 
 parser.add_argument("--img_size", default=512, type=int, help="Input image size")
-parser.add_argument("--residual_block_count", default=3, type=int, help="Number of residual blocks in sequence before a downscale")
+parser.add_argument("--residual_block_count", default=2, type=int, help="Number of residual blocks in sequence before a downscale")
 parser.add_argument("--block_filter_counts", default=[32, 48, 64, 96, 160, 192, 256], nargs="+", type=int, help="Number of residual blocks at each resolution")
 parser.add_argument("--noise_embed_dim", default=32, type=int, help="Sinusoidal embedding dimension")
 
@@ -80,7 +80,7 @@ EDGE_VARIANCE = np.array([0.00015055, 0.00013764, 0.00014862], np.float32)
 # pylint: disable=abstract-method
 class DiffusionModel(tf.keras.Model):
     """Runs a diffusion model that is able to upscale images without losing detail"""
-    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, learning_rate, weight_decay, train_batch_size, batch_size, *args, **kwargs):
+    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, weight_decay, train_batch_size, batch_size, *args, **kwargs):
 
         #create the diffusion model
         def create_diffusion_model(blurry_img, noisy_image, noise_variance):
@@ -101,7 +101,6 @@ class DiffusionModel(tf.keras.Model):
         self.block_filter_counts = block_filter_counts
         self.block_count = block_count
         self.noise_embed_dim = noise_embed_dim
-        self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.train_batch_size = train_batch_size
         self.batch_size = batch_size
@@ -112,7 +111,7 @@ class DiffusionModel(tf.keras.Model):
 
         #use the adam optimizer with weight decay & L1 error
         self.compile(
-            optimizer=tf.optimizers.experimental.AdamW(learning_rate=learning_rate, weight_decay=weight_decay),
+            optimizer=tf.optimizers.experimental.AdamW(weight_decay=weight_decay),
             loss=tf.losses.mean_absolute_error,
             steps_per_execution=steps_before_update
         )
@@ -155,11 +154,6 @@ class DiffusionModel(tf.keras.Model):
 
         # convert angles to noise_rates & signal_rates
         return tf.sin(diffusion_angles), tf.cos(diffusion_angles)
-
-    # def call(self, inputs, training=None, mask=None):
-    #     """Call the model"""
-    #     # Could use the _ema_model here if training was unstable
-    #     return super().__call__(inputs, training=training)
 
     def denoise(self, blurry_image, noisy_image, noise_rates, signal_rates, training) -> tuple[tf.Tensor, tf.Tensor]:
         """Perform one denoising step on the given image"""
@@ -307,7 +301,7 @@ class DiffusionModel(tf.keras.Model):
     @staticmethod
     def new(args):
         """Create a new diffusion model from the given commandline arguments"""
-        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.learning_rate, args.weight_decay, args.train_batch_size, args.batch_size)
+        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.weight_decay, args.train_batch_size, args.batch_size)
 
     def get_config(self):
         return super().get_config() | {
@@ -315,7 +309,6 @@ class DiffusionModel(tf.keras.Model):
             "block_filter_counts":self.block_filter_counts,
             "block_count":self.block_count,
             "noise_embed_dim":self.noise_embed_dim,
-            "learning_rate":self.learning_rate,
             "weight_decay":self.weight_decay,
             "train_batch_size":self.train_batch_size,
             "batch_size": self.batch_size
@@ -369,13 +362,17 @@ def main(args):
     #initialize wandb for logging
     WandbLog.wandb_init("image_outpainting_sharpen", args)
 
+    diffusion_log = DiffusionTrainingLog(
+        dev_dataset, sharpen_dataset, log_frequency=25, test_frequency=5000//args.train_batch_size,
+        train_batch_size=args.train_batch_size, learning_rate_decay=tf.optimizers.schedules.ExponentialDecay(args.learning_rate, 1000000, 0.5))
+
     # train the model
     model.fit(
         train_dataset.repeat(),
         epochs=1,
         callbacks=[
             WandbModelCheckpoint(filepath=get_sharpening_fname(wandb.run.name), monitor="val_image_loss", save_freq=20000//args.train_batch_size),
-            DiffusionTrainingLog(dev_dataset, sharpen_dataset, log_frequency=25, test_frequency=5000//args.train_batch_size, train_batch_size=args.train_batch_size)
+            diffusion_log
     ], steps_per_epoch = args.images_to_process // args.train_batch_size)
 
 

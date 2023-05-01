@@ -33,7 +33,7 @@ class ImageLoading:
 
 
     """Can load the dataset for multiple places and prepare the images for training"""
-    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, stddev_threshold=0.05, shuffle_buffer=1024):
+    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, darkness_threshold=0.2, stddev_threshold=0.05, shuffle_buffer=1024):
         """Create a dataset with the given properties"""
         dataset_location = get_dataset_location(dataset_location)
 
@@ -41,7 +41,7 @@ class ImageLoading:
         load_image_size = np.array([1200, 1600]) // scale_down
 
         #create the full image dataset
-        self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, stddev_threshold, shuffle_buffer)
+        self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, darkness_threshold, stddev_threshold, shuffle_buffer)
 
 
     @classmethod
@@ -110,7 +110,7 @@ class ImageLoading:
         return img
 
 
-    def _create_dataset_internal(self, dataset_location, fname_dataset, data_boxes, load_image_size, box_image_size, stddev_threshold):
+    def _create_dataset_internal(self, dataset_location, fname_dataset, data_boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold):
         """Create the dataset for a given place"""
 
         width, height = load_image_size[1], load_image_size[0]
@@ -135,7 +135,7 @@ class ImageLoading:
             return image
 
         def delete_dark(img):
-            return tf.reduce_mean(img) > 0.2
+            return tf.reduce_mean(img) > darkness_threshold
 
         def delete_monochrome(img):
             #mean color
@@ -153,7 +153,7 @@ class ImageLoading:
             .filter(delete_monochrome)
 
 
-    def _create_dataset(self, dataset_location, load_image_size, box_image_size, stddev_threshold, shuffle_buffer=1024):
+    def _create_dataset(self, dataset_location, load_image_size, box_image_size, darkness_threshold, stddev_threshold, shuffle_buffer=1024):
         """Create a dataset for multiple places"""
 
         #load all masks and image filenames
@@ -166,7 +166,7 @@ class ImageLoading:
         #generate suitable boxes for each mask, and convert them to a tf.constant
         boxes = tf.ragged.constant([self._create_boxes(mask, load_image_size, box_image_size) for mask in masks])
         #create the full dataset
-        dataset = self._create_dataset_internal(dataset_location, fname_dataset, boxes, load_image_size, box_image_size, stddev_threshold)
+        dataset = self._create_dataset_internal(dataset_location, fname_dataset, boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold)
 
         #shuffle if required
         if shuffle_buffer != 0:
@@ -238,7 +238,7 @@ def main(args):
     tf_init(args.use_gpu, args.threads, args.seed)
 
     #create a default dataset
-    dataset = ImageLoading(args.dataset_location, 128, stddev_threshold=0.05, shuffle_buffer=0).create_dataset(8)
+    dataset = ImageLoading(args.dataset_location, 128, darkness_threshold=0.2, stddev_threshold=0.05, shuffle_buffer=0).create_dataset(8)
 
 
     #log the first `args.example_count` batches to wandb

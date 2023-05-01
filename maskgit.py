@@ -31,11 +31,11 @@ parser.add_argument("--transformer_layers", default=2, type=int, help="MaskGIT t
 parser.add_argument("--decode_steps", default=12, type=int, help="MaskGIT decoding steps")
 parser.add_argument("--generation_temperature", default=1.0, type=float, help="How random is MaskGIT during decoding")
 parser.add_argument("--mask_ratio", default=0.5, type=float, help="Percentage of tokens to mask during training")
-
+parser.add_argument("--learning_rate", default=1e-4, type=float, help="The model learning rate")
 
 
 parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
-parser.add_argument("--load_model", default=False, type=bool, help="Whether to load a maskGIT model")
+parser.add_argument("--tokenizer_run", default="224", type=str, help="Which tokenizer should I use")
 
 
 
@@ -112,25 +112,16 @@ def create_maskgit(codebook_size, hidden_size, position_count, intermediate_size
 
 
 
-
-# def nll_loss(y_true, y_pred, sample_weight):
-#     return tf.reduce_sum(-sample_weight * tf.math.log(tf.gather(tf.nn.softmax(y_pred, -1), y_true, batch_dims=3) + 1e-10)) / (tf.reduce_sum(sample_weight)+1e-10)
-
-
 MASK_TOKEN = -1
-MASKGIT_TRANSFORMER_NAME = "maskgit_transformer"
+# pylint: disable=abstract-method
 class MaskGIT(tf.keras.Model):
     """The MaskGIT model class"""
-    def __init__(self, hidden_size, intermediate_size, transformer_heads, transformer_layers, decode_steps, generation_temperature, mask_ratio, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
+    def __init__(self, hidden_size, intermediate_size, transformer_heads, transformer_layers, decode_steps, generation_temperature, mask_ratio, tokenizer_run, *args, **kwargs):
         #load the tokenizer to use during training
-        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer.parser.parse_args([]))
-        self._tokenizer.trainable = False
-        self._tokenizer.build([None, 128, 128, 3])
+        _tokenizer = VQVAEModel.load(get_tokenizer_fname(tokenizer_run), tokenizer.parser.parse_args([]))
 
-        self.codebook_size = self._tokenizer.codebook_size
-        self.input_size_dims = self._tokenizer.latent_space_size
+        self.codebook_size = _tokenizer.codebook_size
+        self.input_size_dims = _tokenizer.latent_space_size
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
         self.transformer_heads = transformer_heads
@@ -138,19 +129,24 @@ class MaskGIT(tf.keras.Model):
         self.decode_steps = decode_steps
         self.generation_temperature = generation_temperature
         self.mask_ratio = mask_ratio
+        self.tokenizer_run = tokenizer_run
+
         input_size = self.input_size_dims[0] * self.input_size_dims[1]
         assert self.input_size_dims[0] == self.input_size_dims[1], "Tokens with different W & H dimensions not supported"
 
-
         #create the transformer model - a downscaled version of the model from the MaskGIT article. Takes tokens as input and produces probabilities of masked tokens on output
-        self._transformer_model = nb.create_model(nb.inp([input_size], dtype=tf.int32), lambda x: x >> create_maskgit(self.codebook_size, hidden_size, input_size, intermediate_size, transformer_heads, transformer_layers), MASKGIT_TRANSFORMER_NAME)
-        self._transformer_model.compile(
+        inp, out = nb.create_model_io(nb.inp([input_size], dtype=tf.int32), lambda x: x >> create_maskgit(self.codebook_size, hidden_size, input_size, intermediate_size, transformer_heads, transformer_layers))
+        super().__init__(inp, out, *args, **kwargs)
+
+        self._tokenizer = _tokenizer
+        self._tokenizer.trainable = False
+        self._tokenizer.build([None, 128, 128, 3])
+
+        self.compile(
             tf.optimizers.Adam(),
-            tf.losses.SparseCategoricalCrossentropy(),
+            tf.losses.SparseCategoricalCrossentropy(from_logits=True),
             [tf.metrics.SparseCategoricalAccuracy()]
         )
-
-        self.compile()
 
         #prepare masks for outpainting - unlike the original article, we always start with a part of an image and try to reconstruct the rest
         #mask size - how many tokens should be removed during training
@@ -205,7 +201,7 @@ class MaskGIT(tf.keras.Model):
     @property
     def token_count(self):
         """The length of the token sequence used as transformer input"""
-        return self._transformer_model.input_shape[1]
+        return self.input_shape[1]
 
     def _mask_schedule(self, mask_ratio):
         """Compute the fraction of masked tokens according to the cosine schedule from the MaskGIT article"""
@@ -277,15 +273,10 @@ class MaskGIT(tf.keras.Model):
             #predict the logits of the target tokens
             logits = self._reshape_logits_to_img(self(self._reshape_to_seq(input_tokens), training=True))
             #compute the loss based on predicted tokens
-            loss = self._transformer_model.compiled_loss(target_tokens, logits, tf.where(doing_prediction, 1.0, 0.0))
+            loss = self.compiled_loss(target_tokens, logits, tf.where(doing_prediction, 1.0, 0.0))
         #minimize the loss
-        self._transformer_model.optimizer.minimize(loss, self._transformer_model.trainable_variables, tape)
+        self.optimizer.minimize(loss, self.trainable_variables, tape)
         return tf.where(doing_prediction, tf.argmax(logits, -1, tf.int32), input_tokens), logits
-
-
-    def call(self, inputs, training=None, mask=None):
-        """Call the transformer model on the given inputs"""
-        return self._transformer_model(inputs, training=training)
 
     def train_step(self, data):
         """Run a training step on the given batch of images"""
@@ -313,13 +304,13 @@ class MaskGIT(tf.keras.Model):
         sample_weight = self._mask_sample_weights(batch_masks)
 
         #update metrics
-        self._transformer_model.compiled_metrics.update_state(tokens, pred_logits, sample_weight)
+        self.compiled_metrics.update_state(tokens, pred_logits, sample_weight)
 
         #return model losses and metrics
         return {
-            'main_loss':self._transformer_model.compiled_loss(tokens, pred_logits, sample_weight),
-            'learning_rate':self._transformer_model.optimizer.learning_rate
-        } | {m.name:m.result() for m in self._transformer_model.metrics}
+            'main_loss':self.compiled_loss(tokens, pred_logits, sample_weight),
+            'learning_rate':self.optimizer.learning_rate
+        } | {m.name:m.result() for m in self.metrics}
 
 
     def test_step(self, data):
@@ -338,12 +329,12 @@ class MaskGIT(tf.keras.Model):
 
         #compute logits using the full decoding with no randomness, measure loss and accuracy
         _, pred_logits_full = self.test_decode(self._mask_tokens(tokens, batch_masks), self.decode_steps, 0.0)
-        full_loss = self._transformer_model.compiled_loss(tokens, pred_logits_full, sample_weights)
+        full_loss = self.compiled_loss(tokens, pred_logits_full, sample_weights)
         full_accuracy = tf.reduce_mean(tf.metrics.sparse_categorical_accuracy(tokens, pred_logits_full))
 
         #compute logits using the simple decoding, measure loss and accuracy
         _, pred_logits_simple = self.test_decode_simple(self._mask_tokens(tokens, batch_masks))
-        simple_loss = self._transformer_model.compiled_loss(tokens, pred_logits_simple, sample_weights)
+        simple_loss = self.compiled_loss(tokens, pred_logits_simple, sample_weights)
         simple_accuracy = tf.reduce_mean(tf.metrics.sparse_categorical_accuracy(tokens, pred_logits_simple))
 
         #return the resulting values of loss and accuracy
@@ -404,7 +395,7 @@ class MaskGIT(tf.keras.Model):
     @staticmethod
     def new(args : argparse.Namespace):
         """Create a new MaskGIT instance using the provided arguments"""
-        return MaskGIT(args.hidden_size, args.intermediate_size, args.transformer_heads, args.transformer_layers, args.decode_steps, args.generation_temperature, args.mask_ratio)
+        return MaskGIT(args.hidden_size, args.intermediate_size, args.transformer_heads, args.transformer_layers, args.decode_steps, args.generation_temperature, args.mask_ratio, args.tokenizer_run)
 
     def get_config(self):
         return super().get_config() | {
@@ -414,8 +405,10 @@ class MaskGIT(tf.keras.Model):
             "transformer_layers": self.transformer_layers,
             "decode_steps": self.decode_steps,
             "generation_temperature": self.generation_temperature,
-            "mask_ratio": self.mask_ratio
+            "mask_ratio": self.mask_ratio,
+            "tokenizer_run": self.tokenizer_run
         }
+# pylint: enable=abstract-method
 
 
 
@@ -449,11 +442,8 @@ def main(args):
             self.log.log_images("images", data).log_images("tokenizer_recreated", recreated).log_images("reconstruction_simple", reconstructed_simple)\
                 .log_images("reconstruction", reconstructed).log_images("generated_images", generated)
 
-    #load the MaskGIT model if requested
-    if not args.load_model:
-        model = MaskGIT.new(args)
-    else:
-        model = MaskGIT.load(get_maskgit_fname())
+    #create a new maskgit model
+    model = MaskGIT.new(args)
 
     #create the train, dev and show datasets
     image_load = ImageLoading(args.dataset_location, args.img_size)
@@ -462,7 +452,7 @@ def main(args):
 
     #start wandb logging
     run_name = WandbLog.wandb_init("image_outpainting_maskgit", args)
-    model_log = MaskGITLog(dev_dataset, show_dataset, 25, 400)
+    model_log = MaskGITLog(dev_dataset, show_dataset, 25, 400, learning_rate_decay=tf.optimizers.schedules.ExponentialDecay(args.learning_rate, 1000000, 0.8))
 
     #train the model
     model.fit(train_dataset, epochs=args.epochs, callbacks = [

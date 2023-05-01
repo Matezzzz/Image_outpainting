@@ -6,9 +6,9 @@ import wandb
 parser = argparse.ArgumentParser()
 
 
-parser.add_argument("--artifact_path", default="matezzzz/image_outpainting_sharpen/run_0wj74hbm_model", type=str, help="The artifact to delete")
-parser.add_argument("--delete_from", default=80, type=int, help="The version from which to start deleting")
-parser.add_argument("--delete_to", default=220, type=int, help="The last version to delete")
+parser.add_argument("artifact_path", default="matezzzz/image_outpainting_sharpen/run_0wj74hbm_model", type=str, help="The artifact to delete")
+parser.add_argument("--delete_from", default=0, type=int, help="The version from which to start deleting")
+parser.add_argument("--delete_to", default=200, type=int, help="The last version to delete")
 parser.add_argument("--keep_each", default=20, type=int, help="Keep each version where (ver % keep_each) == 0")
 
 
@@ -21,7 +21,7 @@ def clean_up_wandb(artifact_path, delete_from, delete_to, keep_each):
     #go over all versions to delete
     for i in range(delete_from, delete_to+1):
         #if I want to keep this one, keep it
-        if i % keep_each == 0:
+        if i % keep_each == 0 and i != 0:
             print ("Keeping", i)
             continue
         try:
@@ -38,5 +38,5 @@ def clean_up_wandb(artifact_path, delete_from, delete_to, keep_each):
 
 
 if __name__ == "__main__":
-    _args = parser.parse_args([])
+    _args = parser.parse_args()
     clean_up_wandb(_args.artifact_path, _args.delete_from, _args.delete_to, _args.keep_each)

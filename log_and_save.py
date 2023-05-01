@@ -57,7 +57,7 @@ class WandbLog:
 
 class TrainingLog(tf.keras.callbacks.Callback):
     """For logging model training progress, running validation after a given number of batches, and custom model testing"""
-    def __init__(self, dev_dataset, test_dataset, log_frequency, test_frequency, validation_frequency=None, train_batch_size = None):
+    def __init__(self, dev_dataset, test_dataset, log_frequency, test_frequency, validation_frequency=None, train_batch_size = None, learning_rate_decay = None):
         super().__init__()
         self.dev_dataset = dev_dataset
         self.test_dataset = iter(test_dataset.repeat(None))
@@ -69,6 +69,13 @@ class TrainingLog(tf.keras.callbacks.Callback):
         self.batches_processed = 0
 
         self.log = WandbLog()
+
+        self.learning_rate_decay = learning_rate_decay
+
+    def on_batch_begin(self, batch, logs=None):
+        if self.learning_rate_decay is not None:
+            tf.keras.backend.set_value(self.model.optimizer.learning_rate, self.learning_rate_decay(self.images_processed))
+        return super().on_batch_begin(batch, logs)
 
     def on_batch_end(self, batch, logs=None):
         """Called by tensorflow when batch ends. Check whether something special like validation or testing should happen"""
@@ -84,14 +91,19 @@ class TrainingLog(tf.keras.callbacks.Callback):
         #if metrics should be logged
         if self.batches_processed % self.log_frequency == 0:
             #log how many examples were processed until now - this is useful when comparing multiple runs with different batch sizes
-            self.log.log_value("images_processed", self.batches_processed*self.batch_size)
+            self.log.log_value("images_processed", self.images_processed)
             #add all metrics to the log
             if logs is not None:
                 self.log.log_dict(logs)
             #log everything
             self.log.commit()
         self.batches_processed += 1
+        
         return super().on_batch_end(batch, logs)
+
+    @property
+    def images_processed(self):
+        return self.batches_processed*self.batch_size
 
     def run_test(self, data):
         """Run a test - this can be overriden by child classes to perform testing for different models"""

@@ -210,10 +210,10 @@ class NetworkBuild:
         def downscale(x):
             intermediate = [x]
             for i, fcount in enumerate(filter_counts):
+                if i != 0:
+                    x = cls.residual_block(fcount, cls.conv_2d, norm_func, activation, strides=2)(x)
                 x = cls.residual_sequence(num_blocks, fcount, norm_func, activation)(x)
                 intermediate.append(x)
-                if i != len(filter_counts)-1:
-                    x = cls.residual_block(fcount, cls.conv_2d, norm_func, activation, strides=2)(x)
             return x if not return_intermediate else intermediate
         return downscale
 
@@ -223,10 +223,10 @@ class NetworkBuild:
         def upscale(x):
             intermediate = [x]
             for i, fcount in enumerate(reversed(filter_counts)):
+                if i != 0:
+                    x = cls.residual_block(fcount, cls.conv_2d_up, norm_func, activation, strides=2)(x)
                 x = cls.residual_sequence(num_blocks, fcount, norm_func, activation)(x)
                 intermediate.append(x)
-                if i != len(filter_counts)-1:
-                    x = cls.residual_block(fcount, cls.conv_2d_up, norm_func, activation, strides=2)(x)
             return x if not return_intermediate else intermediate
         return upscale
 
