@@ -1,75 +1,75 @@
-<mxfile host="Electron" modified="2023-05-01T02:38:06.276Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.2.1 Chrome/112.0.5615.87 Electron/24.1.2 Safari/537.36" etag="095PvkS2hCAA9CK2sxA3" version="21.2.1" type="device">
+<mxfile host="Electron" modified="2023-05-02T22:02:23.068Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.2.1 Chrome/112.0.5615.87 Electron/24.1.2 Safari/537.36" etag="Pj_MYOWKRe7YDhJYUU71" version="21.2.1" type="device">
   <diagram name="Page-1" id="l4fz022ujwAryqne1b17">
-    <mxGraphModel dx="255" dy="274" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="4681" math="0" shadow="0">
+    <mxGraphModel dx="453" dy="674" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="4681" math="1" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="uniE95keQ5X73r_aGtMK-1" value="Downscale step&lt;br&gt;Parameters: filters \(f\)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-          <mxGeometry x="250" y="20" width="160" height="150" as="geometry" />
+        <mxCell id="uniE95keQ5X73r_aGtMK-1" value="Downscale step&lt;br&gt;Parameters: filters \(f\)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+          <mxGeometry x="190" y="20" width="160" height="150" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-4" target="uniE95keQ5X73r_aGtMK-6">
+        <mxCell id="uniE95keQ5X73r_aGtMK-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-4" target="uniE95keQ5X73r_aGtMK-6" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" target="uniE95keQ5X73r_aGtMK-4">
+        <mxCell id="uniE95keQ5X73r_aGtMK-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" target="uniE95keQ5X73r_aGtMK-4" edge="1">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="250" y="110" as="sourcePoint" />
+            <mxPoint x="190" y="110" as="sourcePoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-4" value="Downscaling residual block&lt;br&gt;\(f\)&amp;nbsp;filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="260" y="60" width="60" height="100" as="geometry" />
+        <mxCell id="uniE95keQ5X73r_aGtMK-4" value="Downscaling residual block&lt;br&gt;\(f\)&amp;nbsp;filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
+          <mxGeometry x="200" y="60" width="60" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-6" target="uniE95keQ5X73r_aGtMK-8">
+        <mxCell id="uniE95keQ5X73r_aGtMK-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-6" target="uniE95keQ5X73r_aGtMK-8" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-6" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="330" y="60" width="30" height="100" as="geometry" />
+        <mxCell id="uniE95keQ5X73r_aGtMK-6" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+          <mxGeometry x="270" y="60" width="30" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-8">
+        <mxCell id="uniE95keQ5X73r_aGtMK-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-8" edge="1">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="420" y="110" as="targetPoint" />
+            <mxPoint x="360" y="110" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-8" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="370" y="60" width="30" height="100" as="geometry" />
+        <mxCell id="uniE95keQ5X73r_aGtMK-8" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+          <mxGeometry x="310" y="60" width="30" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-9" value="Upscale step&lt;br&gt;Parameters: filters \(f\)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+        <mxCell id="uniE95keQ5X73r_aGtMK-9" value="Upscale step&lt;br&gt;Parameters: filters \(f\)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
           <mxGeometry x="440" y="20" width="200" height="150" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-13" target="uniE95keQ5X73r_aGtMK-15">
+        <mxCell id="uniE95keQ5X73r_aGtMK-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-13" target="uniE95keQ5X73r_aGtMK-15" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" target="uniE95keQ5X73r_aGtMK-13">
+        <mxCell id="uniE95keQ5X73r_aGtMK-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" target="uniE95keQ5X73r_aGtMK-13" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="440" y="110" as="sourcePoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-12" value="" style="endArrow=classic;html=1;rounded=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;entryPerimeter=0;fillColor=#60a917;strokeColor=#2D7600;" edge="1" parent="1" target="uniE95keQ5X73r_aGtMK-15">
+        <mxCell id="uniE95keQ5X73r_aGtMK-12" value="" style="endArrow=classic;html=1;rounded=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;entryPerimeter=0;fillColor=#60a917;strokeColor=#2D7600;" parent="1" target="uniE95keQ5X73r_aGtMK-15" edge="1">
           <mxGeometry width="50" height="50" relative="1" as="geometry">
             <mxPoint x="430" y="100" as="sourcePoint" />
             <mxPoint x="480" y="50" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-13" value="Upscaling residual block&lt;br&gt;\(f\)&amp;nbsp;filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+        <mxCell id="uniE95keQ5X73r_aGtMK-13" value="Upscaling residual block&lt;br&gt;&lt;svg style=&quot;vertical-align: -0.464ex;&quot; xmlns:xlink=&quot;http://www.w3.org/1999/xlink&quot; viewBox=&quot;0 -705 550 910&quot; role=&quot;img&quot; height=&quot;2.059ex&quot; width=&quot;1.244ex&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;&lt;defs&gt;&lt;path d=&quot;M118 -162Q120 -162 124 -164T135 -167T147 -168Q160 -168 171 -155T187 -126Q197 -99 221 27T267 267T289 382V385H242Q195 385 192 387Q188 390 188 397L195 425Q197 430 203 430T250 431Q298 431 298 432Q298 434 307 482T319 540Q356 705 465 705Q502 703 526 683T550 630Q550 594 529 578T487 561Q443 561 443 603Q443 622 454 636T478 657L487 662Q471 668 457 668Q445 668 434 658T419 630Q412 601 403 552T387 469T380 433Q380 431 435 431Q480 431 487 430T498 424Q499 420 496 407T491 391Q489 386 482 386T428 385H372L349 263Q301 15 282 -47Q255 -132 212 -173Q175 -205 139 -205Q107 -205 81 -186T55 -132Q55 -95 76 -78T118 -61Q162 -61 162 -103Q162 -122 151 -136T127 -157L118 -162Z&quot; id=&quot;MJX-9-TEX-I-1D453&quot;&gt;&lt;/path&gt;&lt;/defs&gt;&lt;g transform=&quot;scale(1,-1)&quot; stroke-width=&quot;0&quot; fill=&quot;currentColor&quot; stroke=&quot;currentColor&quot;&gt;&lt;g data-mml-node=&quot;math&quot;&gt;&lt;g data-mml-node=&quot;mi&quot;&gt;&lt;use xlink:href=&quot;#MJX-9-TEX-I-1D453&quot; data-c=&quot;1D453&quot;&gt;&lt;/use&gt;&lt;/g&gt;&lt;/g&gt;&lt;/g&gt;&lt;/svg&gt;&amp;nbsp;filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
           <mxGeometry x="450" y="60" width="60" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-15" target="uniE95keQ5X73r_aGtMK-17">
+        <mxCell id="uniE95keQ5X73r_aGtMK-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-15" target="uniE95keQ5X73r_aGtMK-17" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-15" value="Concatenate" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+        <mxCell id="uniE95keQ5X73r_aGtMK-15" value="Concatenate" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
           <mxGeometry x="520" y="60" width="30" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-17" target="uniE95keQ5X73r_aGtMK-19">
+        <mxCell id="uniE95keQ5X73r_aGtMK-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-17" target="uniE95keQ5X73r_aGtMK-19" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-17" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+        <mxCell id="uniE95keQ5X73r_aGtMK-17" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
           <mxGeometry x="560" y="60" width="30" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="uniE95keQ5X73r_aGtMK-19">
+        <mxCell id="uniE95keQ5X73r_aGtMK-18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="uniE95keQ5X73r_aGtMK-19" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="650" y="110" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="uniE95keQ5X73r_aGtMK-19" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+        <mxCell id="uniE95keQ5X73r_aGtMK-19" value="Residual block&lt;br&gt;\(f\) filters" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
           <mxGeometry x="600" y="60" width="30" height="100" as="geometry" />
         </mxCell>
       </root>

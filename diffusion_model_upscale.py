@@ -7,7 +7,7 @@ import numpy as np
 import wandb
 from wandb.keras import WandbModelCheckpoint
 
-from tokenizer import VQVAEModel, parser as tokenizer_args_parser
+from tokenizer import VQVAEModel
 from utilities import get_tokenizer_fname, get_sharpening_fname
 from tf_utilities import tf_init
 from build_network import NetworkBuild as nb
@@ -34,7 +34,7 @@ parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight dec
 
 
 parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
-parser.add_argument("--load_model_run", default="", type=str, help="Name of the wandb run that created the model to load")
+parser.add_argument("--load_model_run", default="228", type=str, help="Name of the wandb run that created the model to load")
 
 
 
@@ -94,7 +94,7 @@ class DiffusionModel(tf.keras.Model):
         super().__init__(inp, out, *args, **kwargs)
 
         #the tokenizer that will be used to train the model
-        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(), tokenizer_args_parser.parse_args([]))
+        self._tokenizer = VQVAEModel.load(get_tokenizer_fname())
         self._tokenizer.trainable = False
 
         self.img_size=img_size
@@ -378,5 +378,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    _args = parser.parse_args([] if "__file__" not in globals() else None)
-    main(_args)
+    main(parser.parse_args([] if "__file__" not in globals() else None))

@@ -1,0 +1,56 @@
+\chapter{Results}
+
+
+We present the hyperparameters we used to train all three models, and the results achieved during training and when running the whole algorithm.
+
+We show the parameters used to train all three models in \figref{model_parameters}, then present the results for each model separately.
+
+
+\figureimg{model_parameters}{Model parameters. We stop training manually after the validation loss stops decreasing - causing fractional amount of epochs sometimes. The super sampler has been trained on a smaller number of images, but we didn't expect any significant improvement on the full one, so we didn't retrain it on the full dataset.}
+
+
+\section{Tokenizer result}
+
+The tokenizer gets an image as input, converts it to tokens and back, losing some information in the process, we are mainly interested in how much information was lost during the conversion. First, we present sample images and their reconstructions in \figref{tokenizer_results}, then, the loss progression during training below in \figref{tokenizer_losses}.
+
+\figureimg{tokenizer_results}{Tokenizer results. The top row consists of dataset images, the bottom one contains reconstructed ones. Information loss can be seen in local details, images are significantly more blurry.}
+
+\figureimg{tokenizer_losses}{Tokenizer losses during training. The solid line shows smoothed values using the exponential moving average technique with $k=0.97$. The left graph shows total validation loss (sum of VQVAE reconstruction loss, embedding loss, commitment loss and entropy loss), the right shows reconstruction loss.}
+
+
+
+\section{MaskGIT results}
+
+We train the model to predict the masked tokens. The results we illustrate represent an image being converted to tokens using a tokenizer encoder, hiding some tokens by applying any MaskGIT training mask, using the MaskGIT to reconstruct the missing tokens, then using the tokenizer decoder to convert the result back to an image. We show both the results when decoding during one step, and when using \texttt{decode\_steps}$=12$ and \texttt{generation\_temperature}$=1.0$, in \figref{maskgit_results_1_2} for border masks and in \figref{maskgit_results_1_4} for corner masks.
+
+\figureimg{maskgit_results_1_2}{MaskGIT results, border masks. The first row shows images, just passed through the tokenizer. The second row shows which tokens (black) I discard before attempting to reconstruct them using MaskGIT. The third row shows how MaskGIT can reconstruct the missing parts in one step, and the last row shows how it can recreate them using 12 steps, with the generation temperature set to 1.0. The last row contains relatively few details, this is due to the fairly low generation temperature. We perform experiments with various values when analyzing the outpainting results.}
+
+\figureimg{maskgit_results_1_4}{MaskGIT results, corner masks. Corners have the same meaning as in \figref{maskgit_results_1_2}}
+
+
+During training, we track multiple metrics, most importantly validation accuracy on predicted tokens and validation loss, which can be seen below:
+
+[!!!MaskGIT losses not present yet, training has not finished]
+
+
+\section{Super sampler results}
+
+For the super sampler results, we present the original image, the low-resolution version, and how we manage to recreate the upscaled image, in \figref{upscaler_results}.
+
+\figureimg{upscaler_results}{Super sampler results. The first row is the original image. For the other two rows, we downscale the image, pass it through the tokenizer, and attempt to upscale it. The second row shows the upscaling done via bicubic interpolation, and the last one shows how the super sampler performs.}
+
+During training, the most important metric is the validation loss when predicting noise in an image - during training, it develops as shown in \figref{upscaler_loss}.
+
+\figureimg{upscaler_loss}{The figure shows the validation noise loss when training the super scaler. The model was trained earlier than the tokenizer and MaskGIT, and it uses a smaller subset of locations. Since the validation loss didn't seem to go down significantly at the end of the first epoch, we didn't retrain it on the full dataset.}
+
+
+
+\section{Outpainting results}
+
+We perform experiments with the parameters shown in Figure 4.5:
+
+[!!!Outpainting experiments waiting for MaskGIT training to finish]
+
+We show the original image, then two outpainted versions with the original image placed at the center - one without any upscaling, and one after applying the super sampler with sharpening.
+
+[!!!Outpainting experiments waiting for MaskGIT training to finish]

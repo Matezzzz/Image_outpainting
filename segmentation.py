@@ -296,8 +296,6 @@ def main(args):
     #start wandb logging if requested
     WandbLog.wandb_init("image_outpainting_segmentation", args)
 
-    #! lysa hora 1 mask?
-
     def get_server_path(*args_):
         return get_path(args.server_path, *args_)
 

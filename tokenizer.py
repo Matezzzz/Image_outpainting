@@ -219,7 +219,7 @@ def scaled_mse_loss(y_true, y_pred):
     return tf.reduce_mean((y_true-y_pred)**2) / DATA_VARIANCE
 
 
-
+# pylint: disable=abstract-method
 class VQVAEModel(tf.keras.Model):
     """
     The VQVAE model - contains an encoder, decoder and the vector quantization layer. Enables converting images from and to tokens.
@@ -338,26 +338,22 @@ class VQVAEModel(tf.keras.Model):
                           args.embedding_loss_weight, args.commitment_loss_weight, args.entropy_loss_weight, args.discriminator_loss_weight)
 
     @staticmethod
-    def load(fname, args : argparse.Namespace) -> "VQVAEModel":
+    def load(fname) -> "VQVAEModel":
         """
         Load a VQVAE model from the given filename / directory
         """
 
-        #support loading old models with a missing value in their config
-        def vqvae_load_old(*args2, **kwargs):
+        #custom loading function because automatic loading is broken for some reason
+        def vqvae_load(*args2, **kwargs):
             #if the decoder_noise_dim parameters is missing, set it to the default value
-            if "decoder_noise_dim" not in kwargs:
-                kwargs["decoder_noise_dim"] = args.decoder_noise_dim
+            kwargs.pop("layers")
+            kwargs.pop("input_layers")
+            kwargs.pop("output_layers")
+            kwargs.pop("dtype")
             return VQVAEModel(*args2, **kwargs)
 
         #load the model
-        vqvae_old = tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load_old, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss}, compile=False)
-        #return vqvae_old
-
-        # code that can help with loading problems
-        vqvae = VQVAEModel.new(args)
-        vqvae.set_weights(vqvae_old.get_weights())
-        return vqvae
+        return tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss}, compile=False)
 
 
     @property
@@ -410,6 +406,7 @@ class VQVAEModel(tf.keras.Model):
             "discriminator_loss_weight": self.discriminator_loss_weight,
             "decoder_noise_dim": self.decoder_noise_dim,
         } | self._quantizer.get_config()
+# pylint: enable=abstract-method
 
 
 
@@ -437,7 +434,7 @@ def main(args):
     if not args.load_model:
         model = VQVAEModel.new(args)
     else:
-        model = VQVAEModel.load(get_tokenizer_fname(), args)
+        model = VQVAEModel.load(get_tokenizer_fname())
 
     #load the base dataset
     image_load = ImageLoading(args.dataset_location, args.img_size)

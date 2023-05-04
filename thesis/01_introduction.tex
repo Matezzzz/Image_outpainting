@@ -1,0 +1,12 @@
+\chapter*{Introduction}
+\addcontentsline{toc}{chapter}{Introduction}
+
+
+Image outpainting is an interesting task in the area of generational artificial intelligence. It can be thought of as follows - we have an input image, and add any amount of white rows or columns. The task is then how to recolor the added white pixels in such a way that makes the whole image look feasible. In this thesis, we attempt to create an AI capable of outpainting sky images, in order to improve the capabilities of the SkyGAN model [REF. Also, is this correct?].
+
+In the recent years, there were multiple forays into the area of image generation, most notably DALL-E 2 [research \citep{dalle_2}, web \citep{dalle_2_web}], Midjourney [\citep{midjourney_web}], and Stable diffusion [\citep{stable_diffusion_web}]. These models solve a more general problem than we do - they support a prompt input, describing what should be present in the image, and generate an image based on it. We recognize that there have been many recent advances in diffusion model architectures that achieve record scores on image generation and which could be modified to perform sky image outpainting, however, unlike DALL-E 2 and Stable diffusion with a good prompt, they do not support them out of the box.
+
+In this work, we attempt to create an open-source image outpainting algorithm that can surpass DALL-E 2 and Stable diffusion on the very specific task of outpainting sky images. We use a model inspired by MaskGIT \citep{maskgit} for outpainting the images, and then a diffusion model based on \citep{diffusion_super_sampler} to upscale the results and add some details. Because we only need to generate sky images, we can simplify our models by not dealing with any class-conditional generation and simply training everything exclusively with a sky image dataset, which we create ourselves from a large amount of webcam images.
+
+In \hyperref[background]{Chapter 1}, we will introduce multiple topics from machine learning that will be later used in this thesis, including multi-layer perceptrons, convolutional networks, transformers, and diffusion models. \hyperref[dataset]{Chapter 2} describes how we prepare the dataset before training. In \hyperref[models]{Chapter 3}, we present all models we use in this work - this contains the VQVAE tokenizer, which is required for training the second model, MaskGIT, and finally, the diffusion model super sampler. \hyperref[outpainting]{Chapter 4} then describes how the individual models comprise the final algorithm.
+

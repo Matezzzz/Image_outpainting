@@ -8,7 +8,6 @@ from wandb.keras import WandbModelCheckpoint
 
 from log_and_save import WandbLog, TrainingLog
 from dataset import ImageLoading
-import tokenizer
 from tokenizer import VQVAEModel
 from utilities import get_tokenizer_fname, get_maskgit_fname
 from tf_utilities import tf_init
@@ -35,7 +34,7 @@ parser.add_argument("--learning_rate", default=1e-4, type=float, help="The model
 
 
 parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
-parser.add_argument("--tokenizer_run", default="224", type=str, help="Which tokenizer should I use")
+parser.add_argument("--tokenizer_run", default="228", type=str, help="Which tokenizer should I use")
 
 
 
@@ -103,9 +102,9 @@ def create_maskgit(codebook_size, hidden_size, position_count, intermediate_size
         out = x\
             >> nb.dense(hidden_size, activation="gelu")\
             >> nb.layer_norm()\
-            >> nb.dense(codebook_size, activation=None)
-            #>> embed_layer.compute_logits\
-            #>> BiasLayer()
+            >> embed_layer.compute_logits\
+            >> BiasLayer()
+            #>> nb.dense(codebook_size, activation=None)
         return out.get()
     return maskgit
 
@@ -118,7 +117,7 @@ class MaskGIT(tf.keras.Model):
     """The MaskGIT model class"""
     def __init__(self, hidden_size, intermediate_size, transformer_heads, transformer_layers, decode_steps, generation_temperature, mask_ratio, tokenizer_run, *args, **kwargs):
         #load the tokenizer to use during training
-        _tokenizer = VQVAEModel.load(get_tokenizer_fname(tokenizer_run), tokenizer.parser.parse_args([]))
+        _tokenizer = VQVAEModel.load(get_tokenizer_fname(tokenizer_run))
 
         self.codebook_size = _tokenizer.codebook_size
         self.input_size_dims = _tokenizer.latent_space_size
@@ -389,7 +388,6 @@ class MaskGIT(tf.keras.Model):
         """Load MaskGIT from a filename"""
         return tf.keras.models.load_model(dirname, custom_objects={
             "MaskGIT":MaskGIT, "VQVAEModel":VQVAEModel, "BiasLayer":BiasLayer, "TokenEmbedding":TokenEmbedding
-            #"TransformerLayer":TransformerLayer, "TransformerMLP":TransformerMLP, "TransformerAttention":TransformerAttention
         })
 
     @staticmethod

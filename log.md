@@ -75,3 +75,8 @@ trying to improve images - add details
 
 
  * Fix maskgit (validation error, whoops)!!!
+
+
+
+
+... used matezzzz/image_outpainting_tokenizer/run_1zb2vsze_model:v7 for training maskgit

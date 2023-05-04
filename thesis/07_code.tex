@@ -1,0 +1,100 @@
+\chapter{Code}
+
+We chose Python 3.10.9 as the main language for implementing this project, due to its popularity in the area of machine learning and the high quality frameworks available. We make the project available on \href{https://github.com/Matezzzz/Image_outpainting}{GitHub}, and use the following libraries:
+
+\begin{itemize}
+    \item \textbf{Tensorflow 2.11.1} \citep{tensorflow} - The main machine learning library we use. For defining all models, and their training.
+    \item \textbf{Tensorflow-probability 0.19.0} \citep{tensorflow_probability} - Probability utilities for tensorflow, we use it to sample from some distributions
+    \item \textbf{Numpy 1.23.5} \citep{numpy} - Numpy, for several mathematical operations on arrays
+    \item \textbf{Pillow 9.4.0} \citep{pillow} - Pillow, for loading images
+    \item \textbf{Wandb 0.15.0} \citep{wandb} - Weights and biases, a library for logging training metrics, models, and more.
+    \item \textbf{Opencv-python 4.7.0.72} \citep{opencv_python} - An image processing library. We use it during image segmentation
+    \item \textbf{Scikit-image 0.20.0} \citep{scikit_image} - An image processing library. We use it during image segmentation
+    \item \textbf{Paramiko 3.1.0} \citep{paramiko} - A library for SSH communication. We use it for fecthing location data from a server when creating segmentation masks.
+\end{itemize}
+
+
+We follow up with a short guide for installing the required libraries, then we describe how to run outpainting, and finally, how to train new models.
+
+\section{Installation}
+
+We provide a short guide that should fit all users below:
+
+\begin{enumerate}
+    \item Install a compatible version of Python. 3.10.9 is recommended. We suggest using a virtual environment for the following steps - \cite{anaconda} is recommended, but any other environment manager should work.
+    \item Install tensorflow 2.11. The process for installing the GPU version is quite arduous, since it requires installing CUDA and other libraries. Refer to the guide at \href{https://www.tensorflow.org/install}{the tensorflow website} for more information.
+    \item Install all other python libraries. This can be done simply by using the command \texttt{pip install numpy tensorflow-probability Pillow wandb python-opencv scikit-image paramiko}. If any package-specific problems occur, specify the exact version - though we didn't experience any problems when installing without it.
+\end{enumerate}
+
+
+\section{Architecture}
+
+Before going into how to run the code, we describe which parts of the project are present and what each of them does, briefly. We mark the most important files in \textcolor{red}{red}, useful modules in \textcolor{green}{green}, files used independently in \textcolor{yellow}{yellow}, and useful directories in \textcolor{blue}{blue}:
+\begin{itemize}
+    \item \textcolor{red}{\texttt{tokenizer.py}} For training the VQVAE tokenizer
+    \item \textcolor{red}{\texttt{maskgit.py}} For training the MaskGIT model
+    \item \textcolor{red}{\texttt{diffusion\_model\_upscale.py}} For training the super sampler
+    \item \textcolor{red}{\texttt{outpainting.py}} For running outpainting
+
+    \item \textcolor{green}{\texttt{build\_network.py}} Utilities to make building networks in tensorflow simpler
+    \item \textcolor{green}{\texttt{dataset.py}} Image dataset loading, filtering, and segmentation according to known masks
+    \item \textcolor{green}{\texttt{log\_and\_save.py}} Logging training metrics to wandb, useful callbacks
+    \item \textcolor{green}{\texttt{tf\_utilities.py}} Function for initializing tensorflow
+    \item \textcolor{green}{\texttt{utilities.py}} Multiple functions for working with files, getting filenames and more
+
+    \item \textcolor{yellow}{\texttt{check\_dataset.py}} Go over all images in a dataset and notify the user about those with broken formatting
+    \item \textcolor{yellow}{\texttt{clean\_up\_wandb.py}} Delete old model versions from wandb.
+    \item \textcolor{yellow}{\texttt{segmentation.py}} Create segmentation masks
+
+    \item \textcolor{blue}{\texttt{./masks}} Contains masks for all locations. During training, only the locations from here will be used.
+    \item \textcolor{blue}{\texttt{./data}} During the first run, we search for all training data matching \texttt{(dataset_location)/place/*/*.jpg}, where place has an available mask at \texttt{./masks/(place)\_mask.png}. This creates two files, \texttt{./data/masks.npy.gz}, and \texttt{masks/filename_dataset.data}, which will be used in all subsequent runs
+    \item \textcolor{blue}{\texttt{./models}} All models will be loaded from or saved to this directory
+    \item \textcolor{blue}{\texttt{(dataset_location)}} Specified as a parameter - defines the location of all training images
+\end{itemize}
+
+
+\section{Running scripts}
+
+We use wandb library for visualising the results. When running the first script, you will be prompted to either run in anonymous mode, where the results of the run will be stored for a week, or create an account to store them for longer. 
+
+Before we go through all the scripts to describe how to run them, we list some parameters shared between multiple scripts, for clarity. In all listings, we display parameters that require additional care as \textcolor{red}{red}.
+\begin{itemize}
+    \item \texttt{--use\_gpu} The GPU to use, if multiple are present in the system
+    \item \texttt{--seed} The random seed
+    \item \texttt{--threads} CPU threads tensorflow can use
+    \item \texttt{--img\_size} Size of input images. If any model is being loaded in this script, the size must match
+    \item \texttt{--batch\_size} The size of batch
+    \item \textcolor{red}{\texttt{--dataset\_location}} Where the data is found. The path to each image should match \texttt{dataset\_location/place/*/*.jpg"}, corresponding to \texttt{dataset\_location/place/time/*.jpg}. If no value is specified, the value of the \texttt{IMAGE\_OUTPAINTING\_DATASET\_LOCATION} is used. Since the data is assumed to be raw webcam data, for it to be used, a mask of matching name, \texttt{./masks/place\_mask.png} must be present. During outpainting, there is an additional parameter to support using images in a folder, without masks, while still using this path.
+\end{itemize}
+
+
+
+\subsection{Running outpainting}
+
+Outpainting is implemented in the \texttt{outpainting.py} file. It takes the following arguments (marked in red are those requiring some attention):
+\begin{itemize}
+    \item \texttt{--attempt\_count} How many examples to produce for one input image
+    \item \texttt{--example\_count} How many images to process, at most
+    \item \texttt{--outpaint\_range} How far out to outpaint
+    \item \texttt{--generation\_temp} Generation temperature
+    \item \texttt{--samples} The quality of image decoding
+    \item \texttt{--decoding} \texttt{full} or \texttt{simple} - the type of MaskGIT decoding to use, 1-step or with \texttt{decoding\_steps}
+    \item \texttt{--maskgit\_steps}, =\texttt{decoding\_steps} to use when outpainting tokens
+    \item \texttt{--diffusion\_steps} how many steps to use when upscaling
+    \item \texttt{--generate\_upsampled} whether to use the super sampler
+    \item \textcolor{red}{\texttt{--maskgit\_run}} the name of the MaskGIT model to use. It should exist at the path \texttt{./models/maskgit\_\{maskgit\_run\}}
+    \item \textcolor{red}{\texttt{--sharpen\_run}} the name of the super sampler model to use. It should exist at the path \texttt{./models/sharpen\_\{sharpen\_run\}}
+    \item \texttt{--outpaint\_step} What part of the image to fill when outpainting during one step. Should match the one specified in MaskGIT.
+    \item \textcolor{red}{\texttt{--dataset\_outpaint\_only}} when set as true, the \texttt{--dataset\_location} will be assumed to contain images directly.
+\end{itemize}
+
+
+\subsection{Running training}
+
+We present a short guide for training the models, but we do not provide the training data. The current webcam images are available publicly at the \citep{chmi_webcams}, from where it should be possible to scrape the data and obtain a dataset of a reasonable size over several weeks. For most of the czech locations, masks are available in the GitHub repository.
+
+\begin{enumerate}
+    \item When using a set of data from the czech hydro-meteorological institute, one can reuse the computed masks available in the git repository, save the data in the format \texttt{root/place/*/*.jpg}, then set \texttt{--dataset\_location=root} when running a script. If you are using a different set of data, you need to create your own set of masks - for this, use the \texttt{segmentation.py} script - we suggest either downloading the data from a server automatically, or writing your own script that calls the \texttt{image\_segmentation} method for all required locations
+    \item With enough data and masks ready, we can start training. There are some prerequisites - MaskGIT requires a trained tokenizer to be trained, and the same goes for the super sampler. There is a parameter, \texttt{--tokenizer\_run}, defining what tokenizer to use. The trained model will be automatically saved in the \texttt{models} folder, from where it can be run later.
+\end{enumerate}
+
