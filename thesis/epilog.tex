@@ -1,6 +1,14 @@
 \chapter*{Conclusion}
 \addcontentsline{toc}{chapter}{Conclusion}
 
+In this work, we created an algorithm capable of sky image outpainting by combining three models, the VQVAE tokenizer, the masked generative transformer, and a diffusion model super sampler, trained exclusively on a dataset of sky images.
 
+We compared our results to two state-of-the-art models supporting sky image outpainting, DALL-E 2 and Stable diffusion, and found out that we are able to outperform Stable diffusion in some areas, and although we fail to surpass the quality of generation offered By DALL-E 2, we at least provide an open-source implementation.
 
-[!!!Not done yet]
+Our implementation is available at \href{https://github.com/Matezzzz/Image_outpainting}.
+
+\section{Future work}
+
+There are many things that can be improved on our approach to the problem - we believe that better regularization might prove beneficial to the generation quality, and avoid having to ban the generation some tokens in the outpainting phase. Also, tweaking architectures and hyperparameters for each of the models could yield better results. We believe that using a decoder architecture that is more suited to adding details when generating high-resolution images should help too.
+
+As for other architectures, training a diffusion model that will perform outpainting directly instead of just using one for upscaling is a promising area of research that might yield better results. Finetuning stable diffusion to perform this task is a possibility as well - its main weakness was adding unnecessary objects to the outpainted image, finetuning on a cloud image dataset might provide a great boost in performance.

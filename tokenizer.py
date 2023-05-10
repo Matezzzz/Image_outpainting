@@ -343,17 +343,10 @@ class VQVAEModel(tf.keras.Model):
         Load a VQVAE model from the given filename / directory
         """
 
-        #custom loading function because automatic loading is broken for some reason
-        def vqvae_load(*args2, **kwargs):
-            #if the decoder_noise_dim parameters is missing, set it to the default value
-            kwargs.pop("layers")
-            kwargs.pop("input_layers")
-            kwargs.pop("output_layers")
-            kwargs.pop("dtype")
-            return VQVAEModel(*args2, **kwargs)
+
 
         #load the model
-        return tf.keras.models.load_model(fname, {"VQVAEModel":vqvae_load, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss}, compile=False)
+        return tf.keras.models.load_model(fname, VQVAEModel.custom_objects(), compile=False)
 
 
     @property
@@ -406,6 +399,18 @@ class VQVAEModel(tf.keras.Model):
             "discriminator_loss_weight": self.discriminator_loss_weight,
             "decoder_noise_dim": self.decoder_noise_dim,
         } | self._quantizer.get_config()
+
+    @staticmethod
+    def custom_objects():
+        #custom loading function because automatic loading is broken for some reason
+        def vqvae_load(*args2, **kwargs):
+            kwargs.pop("layers")
+            kwargs.pop("input_layers")
+            kwargs.pop("output_layers")
+            kwargs.pop("dtype")
+            return VQVAEModel(*args2, **kwargs)
+        return {"VQVAEModel":vqvae_load, "VectorQuantizer":VectorQuantizer, "scaled_mse_loss":scaled_mse_loss}
+
 # pylint: enable=abstract-method
 
 

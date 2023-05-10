@@ -1,10 +1,10 @@
-<mxfile host="Electron" modified="2023-05-01T14:36:39.494Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.2.1 Chrome/112.0.5615.87 Electron/24.1.2 Safari/537.36" etag="UY16PbATYSPN8ubaa2Dc" version="21.2.1" type="device">
+<mxfile host="Electron" modified="2023-05-09T13:56:19.293Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.2.8 Chrome/112.0.5615.165 Electron/24.2.0 Safari/537.36" etag="MmSMhlZJORySbWtrge--" version="21.2.8" type="device">
   <diagram name="Page-1" id="XiA0gzBIP4eXFHoeiRcS">
-    <mxGraphModel dx="546" dy="819" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="4681" math="1" shadow="0">
+    <mxGraphModel dx="572" dy="328" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="4681" math="1" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="7ZNc9QdYcXf0Uin__PVC-1" value="Upscaler diffusion model&lt;br&gt;Parameters: \(n\) noise embedding dimension, \(F\) filter counts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;opacity=50;verticalAlign=top;" vertex="1" parent="1">
+        <mxCell id="7ZNc9QdYcXf0Uin__PVC-1" value="Upscaler diffusion model&lt;br&gt;Parameters: \(n\) noise embedding dimension, \(F\) filter counts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;opacity=50;verticalAlign=top;" parent="1" vertex="1">
           <mxGeometry x="90" y="130" width="540" height="300" as="geometry" />
         </mxCell>
         <mxCell id="FyBI2lJIW7ywhzcLaJma-123" value="" style="endArrow=classic;html=1;rounded=0;fillColor=#60a917;strokeColor=#2D7600;edgeStyle=elbowEdgeStyle;elbow=vertical;" parent="1" source="FyBI2lJIW7ywhzcLaJma-3" target="FyBI2lJIW7ywhzcLaJma-121" edge="1">
@@ -31,17 +31,13 @@
         <mxCell id="FyBI2lJIW7ywhzcLaJma-4" value="Noisy edges&lt;br&gt;\(512\times 512 \times 3 \)" style="rounded=1;whiteSpace=wrap;html=1;horizontal=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
           <mxGeometry x="100" y="220" width="90" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="FyBI2lJIW7ywhzcLaJma-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="FyBI2lJIW7ywhzcLaJma-5" target="FyBI2lJIW7ywhzcLaJma-6" edge="1">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="FyBI2lJIW7ywhzcLaJma-5" value="Noise magnitude" style="rounded=1;whiteSpace=wrap;html=1;horizontal=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
+          <mxGeometry x="100" y="270" width="90" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="FyBI2lJIW7ywhzcLaJma-5" value="Noise magnitude" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
-          <mxGeometry x="100" y="270" width="30" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="FyBI2lJIW7ywhzcLaJma-131" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="FyBI2lJIW7ywhzcLaJma-6" target="FyBI2lJIW7ywhzcLaJma-3" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="FyBI2lJIW7ywhzcLaJma-6" value="Sinusoidal embedding&lt;br&gt;\(1 \rightarrow n\)" style="rounded=1;whiteSpace=wrap;html=1;horizontal=0;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
-          <mxGeometry x="140" y="270" width="50" height="100" as="geometry" />
+        <mxCell id="FyBI2lJIW7ywhzcLaJma-131" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="FyBI2lJIW7ywhzcLaJma-5" target="FyBI2lJIW7ywhzcLaJma-3" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="190.0000000000001" y="291.42857142857144" as="sourcePoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="FyBI2lJIW7ywhzcLaJma-15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="FyBI2lJIW7ywhzcLaJma-11" target="FyBI2lJIW7ywhzcLaJma-14" edge="1">
           <mxGeometry relative="1" as="geometry" />

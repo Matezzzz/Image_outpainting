@@ -1,56 +1,88 @@
-\chapter{Results}
+\chapter{Results} \label{results}
 
 
-We present the hyperparameters we used to train all three models, and the results achieved during training and when running the whole algorithm.
+We present the~hyperparameters we used to train all three models, and the~results achieved during training and when running the~whole algorithm.
 
-We show the parameters used to train all three models in \figref{model_parameters}, then present the results for each model separately.
+We show the~parameters used to train all three models in \figref{model_parameters}, then present the~results for each model separately.
 
 
-\figureimg{model_parameters}{Model parameters. We stop training manually after the validation loss stops decreasing - causing fractional amount of epochs sometimes. The super sampler has been trained on a smaller number of images, but we didn't expect any significant improvement on the full one, so we didn't retrain it on the full dataset.}
+\figureimg{model_parameters}{Model parameters. We stop training manually after the~validation loss stops decreasing - causing fractional amount of epochs sometimes. The~super sampler has been trained on a~smaller number of images, but we didn't expect any significant improvement on the~full one, so we didn't retrain it on the~full dataset.}
 
 
 \section{Tokenizer result}
 
-The tokenizer gets an image as input, converts it to tokens and back, losing some information in the process, we are mainly interested in how much information was lost during the conversion. First, we present sample images and their reconstructions in \figref{tokenizer_results}, then, the loss progression during training below in \figref{tokenizer_losses}.
+The tokenizer gets an~image as input, converts it to tokens and back, losing some information in the~process, we are mainly interested in how much information was lost during the~conversion. First, we present sample images and their reconstructions in \figref{tokenizer_results}, then, the~loss progression during training below in \figref{tokenizer_losses}.
 
-\figureimg{tokenizer_results}{Tokenizer results. The top row consists of dataset images, the bottom one contains reconstructed ones. Information loss can be seen in local details, images are significantly more blurry.}
+\figureimg{tokenizer_results}{Tokenizer results. The~top row consists of dataset images, the~second one contains reconstructed ones. Third and fourth row show the~contents of the~red boundaries in the~original and reconstruction respectively, showing the~loss of local details, images are significantly more blurry.}
 
-\figureimg{tokenizer_losses}{Tokenizer losses during training. The solid line shows smoothed values using the exponential moving average technique with $k=0.97$. The left graph shows total validation loss (sum of VQVAE reconstruction loss, embedding loss, commitment loss and entropy loss), the right shows reconstruction loss.}
+\figureimg{tokenizer_losses}{Tokenizer losses during training. The~solid line shows smoothed values using the~exponential moving average technique with $k=0.97$. The~left graph shows total validation loss (sum of VQVAE reconstruction loss, embedding loss, commitment loss and entropy loss), the~right shows reconstruction loss.}
 
 
 
 \section{MaskGIT results}
 
-We train the model to predict the masked tokens. The results we illustrate represent an image being converted to tokens using a tokenizer encoder, hiding some tokens by applying any MaskGIT training mask, using the MaskGIT to reconstruct the missing tokens, then using the tokenizer decoder to convert the result back to an image. We show both the results when decoding during one step, and when using \texttt{decode\_steps}$=12$ and \texttt{generation\_temperature}$=1.0$, in \figref{maskgit_results_1_2} for border masks and in \figref{maskgit_results_1_4} for corner masks.
+We train the~model to predict the~masked tokens. The~results we illustrate represent an~image being converted to tokens using a~tokenizer encoder, hiding some tokens by applying any MaskGIT training mask, using the~MaskGIT to reconstruct the~missing tokens, then using the~tokenizer decoder to convert the~result back to an~image. We show both the~results when decoding during one step, and when using \texttt{decode\_steps}$=12$ and \texttt{generation\_temperature}$=1.0$, in \figref{maskgit_results_1_2} for border masks and in \figref{maskgit_results_1_4} for corner masks.
 
-\figureimg{maskgit_results_1_2}{MaskGIT results, border masks. The first row shows images, just passed through the tokenizer. The second row shows which tokens (black) I discard before attempting to reconstruct them using MaskGIT. The third row shows how MaskGIT can reconstruct the missing parts in one step, and the last row shows how it can recreate them using 12 steps, with the generation temperature set to 1.0. The last row contains relatively few details, this is due to the fairly low generation temperature. We perform experiments with various values when analyzing the outpainting results.}
+\figureimg{maskgit_results_1_2}{MaskGIT results, border masks. The~first row shows images, just passed through the~tokenizer. The~second row shows which tokens (black) we discard before attempting to reconstruct them using MaskGIT. The~third row shows how MaskGIT can reconstruct the~missing parts in one step, and the~last row shows how it can recreate them using 12 steps, with the~generation temperature set to 1.0. The~last row contains relatively few details, this is due to the~fairly low generation temperature. We perform experiments with various values when analyzing the~outpainting results.}
 
-\figureimg{maskgit_results_1_4}{MaskGIT results, corner masks. Corners have the same meaning as in \figref{maskgit_results_1_2}}
+\figureimg{maskgit_results_1_4}{MaskGIT results, corner masks. Rows have the~same meaning as in \figref{maskgit_results_1_2}}
 
+During training, we track multiple metrics, most importantly validation accuracy on predicted tokens and validation loss, presented in \figref{maskgit_losses}.
 
-During training, we track multiple metrics, most importantly validation accuracy on predicted tokens and validation loss, which can be seen below:
-
-[!!!MaskGIT losses not present yet, training has not finished]
+\figureimg{maskgit_losses}{MaskGIT losses. We track the~validation accuracy when estimating all tokens discarded according to a~training mask and validaton loss on the~same set of tokens.}
 
 
 \section{Super sampler results}
 
-For the super sampler results, we present the original image, the low-resolution version, and how we manage to recreate the upscaled image, in \figref{upscaler_results}.
+For the~super sampler results, we present the~original image, the~low-resolution version, and how we manage to recreate the~upscaled image, in \figref{upscaler_results}.
 
-\figureimg{upscaler_results}{Super sampler results. The first row is the original image. For the other two rows, we downscale the image, pass it through the tokenizer, and attempt to upscale it. The second row shows the upscaling done via bicubic interpolation, and the last one shows how the super sampler performs.}
+\figureimg{upscaler_results}{Super sampler results. The~first row is the~original image. For the~other two rows, we downscale the~image, pass it through the~tokenizer, and attempt to upscale it. The~second row shows the~upscaling done via bicubic interpolation, and the~last one shows how the~super sampler performs. The last row shows a unpleasant side-effect of using the tokenizer - even though it reconstructs a large portion of details from the original image, sometimes it adds unpleasant noise to the created image.}
 
-During training, the most important metric is the validation loss when predicting noise in an image - during training, it develops as shown in \figref{upscaler_loss}.
+During training, the~most important metric is the~validation loss when predicting noise in an~image - during training, it develops as shown in \figref{upscaler_loss}.
 
-\figureimg{upscaler_loss}{The figure shows the validation noise loss when training the super scaler. The model was trained earlier than the tokenizer and MaskGIT, and it uses a smaller subset of locations. Since the validation loss didn't seem to go down significantly at the end of the first epoch, we didn't retrain it on the full dataset.}
+\figureimg{upscaler_loss}{Shows the~validation noise loss when training the~super scaler. The~model was trained earlier than the~tokenizer and MaskGIT, and it uses a~smaller subset of locations. Since the~validation loss didn't seem to go down significantly at the~end of the~first epoch, we didn't retrain it on the~full dataset.}
 
 
 
 \section{Outpainting results}
 
-We perform experiments with the parameters shown in Figure 4.5:
+In this section, we will present the ideal parameters for our outpainting algorithm, detailed results, and finally, how it compares to other machine learning solutions capable of outpainting.
 
-[!!!Outpainting experiments waiting for MaskGIT training to finish]
+\subsection{Selecting parameters}
 
-We show the original image, then two outpainted versions with the original image placed at the center - one without any upscaling, and one after applying the super sampler with sharpening.
+In this chapter, we seek to select the outpainting parameters in a way that maximizes the performance of our outpainting algorithm. Our experiments have shown that results do not differ for all values of the \texttt{samples} parameter greater than one, so we use \texttt{samples}$=2$ in all our experiments, as it requires the least processing power and makes the result less blurry. We try three values for the \texttt{generation_temperature} parameter - $1$, $4$, and $10$, and show the results in \figref{generation_temperature_testing}.
 
-[!!!Outpainting experiments waiting for MaskGIT training to finish]
+\figureimg{generation_temperature_testing}{The first row shows the image which we perform outpainting on, the others several different generation temperatures, and the original image, from which we outpaint. We always create four outpainted images for each input, and select the best one according to our judgement}
+
+We believe generation temperature $t=4$ to be the best default setting, as it is able to create much more details than $t=2$, while still avoiding the noise and strange clouds sometimes present when using $t=10$. For this reason, we use $t=4$ in all subsequent figures.
+
+
+\subsection{Our results}
+
+We demonstrate the outpainting performance including all outpainted images for a given input in \figref{outpainting_results_1} and \figref{outpainting_results_2}. We use the best parameters found in the previous section, \texttt{samples}$=2$, \texttt{generation\_temp}$=4$. 
+
+\figureimg{outpainting_results_1}{Outpainting results, part 1. There are some inconsistencies compared to the real sky - the outpainted images in last three columns contain a large monochrome area at the bottom, which we would argue is not very probable in nature, but outside of that, the images look quite realistic.}
+
+\figureimg{outpainting_results_2}{Outpainting results, part 2, same parameters as \figref{outpainting_results_1}. There are a few more inconsistencies, for example weird bottom parts in the first column or oversaturated parts in the third. But overall, clouds look quite good.}
+
+
+
+\subsection{Comparing to other models}
+
+In this section, we compare our algorithm against two popular image generation models that support sky outpainting, namely DALL-E 2 \citep{dalle_2_web} and Stable diffusion \citep{stable_diffusion_web} in \figref{outpainting_comparison_1} and \figref{outpainting_comparison_2}. For our model, we choose the best result of four tries, for DALLE-2 and stable diffusion, we choose the best of four for each side. We always use the prompt 'Photo of a sky' when performing outpainting. We use a~third party stable diffusion outpainting implementation freely available at \citep{stable_diffusion_editor}, and the official DALL-E 2.
+
+
+
+
+\figureimg{outpainting_comparison_1}{Outpainting comparison. Black border marks the image we outpaint from, red our result, blue stable diffusion and green DALL-E 2. Stable diffusion is prone to adding unrequested objects to the side of the image in some of the four tries, we always select the option where the object blocks the smallest part of the sky.}
+
+\figureimg{outpainting_comparison_2}{Comparing another two images. Borders hold the same meaning as in \figref{outpainting_comparison_1}}
+
+We believe that our technique is better than stable diffusion, while being far behind DALL-E 2 in most areas. We present a short summary of our observations regarding the pros and cons of all models below:
+
+\begin{itemize}
+    \item Our outpainting algorithm. Never introduces additional objects into the scene, is quite stable. Images sometimes lack details, because generation itself runs in a lower resolution, and we only upscale the image. Has a tendency to create largely monochrome images sometimes, this could be prevented by using a larger generation temperature, at the cost of introducing strange clouds sometimes.
+    \item Stable diffusion. Generated images are a bit more diverse, and the generator doesn't converge to monochrome images. However, it is much less consistent - sometimes, unrequested objects are added to the outpainted image, or the result has a visibly different hue.
+    \item DALLE-2. During our testing, the images created by DALL-E 2 surpassed our quality or the stable diffusion quality by a long shot. Most of the time, all 4 options show feasible cloud configurations, local details are really good as well, random objects are present only rarely. The only area DALL-E 2 loses in is that it is not open-source, unlike the previous two algorithms.
+\end{itemize}
+

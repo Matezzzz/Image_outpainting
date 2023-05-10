@@ -29,12 +29,12 @@ parser.add_argument("--residual_block_count", default=2, type=int, help="Number 
 parser.add_argument("--block_filter_counts", default=[32, 48, 64, 96, 160, 192, 256], nargs="+", type=int, help="Number of residual blocks at each resolution")
 parser.add_argument("--noise_embed_dim", default=32, type=int, help="Sinusoidal embedding dimension")
 
-parser.add_argument("--learning_rate", default=1e-3, type=float, help="Learning rate")
-parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay")
+parser.add_argument("--learning_rate", default=1e-4, type=float, help="Learning rate")
+parser.add_argument("--weight_decay", default=1e-5, type=float, help="Weight decay")
 
 
 parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
-parser.add_argument("--load_model_run", default="228", type=str, help="Name of the wandb run that created the model to load")
+parser.add_argument("--tokenizer_run", default="228", type=str, help="Name of the wandb run that created the tokenizer to load")
 
 
 
@@ -51,17 +51,21 @@ MAX_SIGNAL_RATE = 0.95
 #frequencies used for the sinusoidal embedding
 EMBEDDING_MIN_FREQUENCY = 1.0
 EMBEDDING_MAX_FREQUENCY = 1000.0
-def sinusoidal_embedding(img_size, embedding_dims):
-    """Return a function that computes a sinusoidal embedding"""
+USE_SINUSOIDAL_EMBED = False
+def noise_variance_embedding(img_size, embedding_dims):
+    """Return a function that returns either a sinusoidal embedding or just the values, based on the settings"""
     # The frequencies of individual embedding components will be a geometric row
     frequencies = tf.experimental.numpy.geomspace(EMBEDDING_MIN_FREQUENCY, EMBEDDING_MAX_FREQUENCY, embedding_dims//2, dtype=tf.float32)
     # Legacy way of computing frequencies
-    # frequencies = tf.exp(tf.linspace(tf.math.log(EMBEDDING_MIN_FREQUENCY), tf.math.log(EMBEDDING_MAX_FREQUENCY), embedding_dims // 2))
+    frequencies = tf.exp(tf.linspace(tf.math.log(EMBEDDING_MIN_FREQUENCY), tf.math.log(EMBEDDING_MAX_FREQUENCY), embedding_dims // 2))
     angular_speeds = 2.0 * math.pi * frequencies
 
     def apply(x):
         #compute embeddings for one x
-        embeddings = tf.concat([tf.sin(angular_speeds * x[:, tf.newaxis]), tf.cos(angular_speeds * x[:, tf.newaxis])], 1)
+        if USE_SINUSOIDAL_EMBED:
+            embeddings = tf.concat([tf.sin(angular_speeds * x[:, tf.newaxis]), tf.cos(angular_speeds * x[:, tf.newaxis])], 1)
+        else:
+            embeddings = x[:, tf.newaxis]
         #tile embeddings so they have the same size as the input image
         embeddings_whole = tf.tile(embeddings[:, tf.newaxis, tf.newaxis, :], [1, img_size, img_size, 1])
         return embeddings_whole
@@ -80,12 +84,12 @@ EDGE_VARIANCE = np.array([0.00015055, 0.00013764, 0.00014862], np.float32)
 # pylint: disable=abstract-method
 class DiffusionModel(tf.keras.Model):
     """Runs a diffusion model that is able to upscale images without losing detail"""
-    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, weight_decay, train_batch_size, batch_size, *args, **kwargs):
+    def __init__(self, img_size, block_filter_counts, block_count, noise_embed_dim, weight_decay, train_batch_size, batch_size, tokenizer_run, *args, **kwargs):
 
         #create the diffusion model
         def create_diffusion_model(blurry_img, noisy_image, noise_variance):
             #add sinusoidal embeddings as additional filters to the first layer
-            inp = nb.concat([blurry_img, noisy_image, noise_variance >> sinusoidal_embedding(img_size, noise_embed_dim)], -1)
+            inp = nb.concat([blurry_img, noisy_image, noise_variance >> noise_variance_embedding(img_size, noise_embed_dim)], -1)
             #pass everything through the u-net model, then do one final convolution to produce the results
             return inp >> nb.u_net(block_filter_counts, block_count, nb.layer_norm) >> nb.conv_2d(3, kernel_size=1)
 
@@ -94,7 +98,7 @@ class DiffusionModel(tf.keras.Model):
         super().__init__(inp, out, *args, **kwargs)
 
         #the tokenizer that will be used to train the model
-        self._tokenizer = VQVAEModel.load(get_tokenizer_fname())
+        self._tokenizer = VQVAEModel.load(get_tokenizer_fname(tokenizer_run))
         self._tokenizer.trainable = False
 
         self.img_size=img_size
@@ -104,6 +108,7 @@ class DiffusionModel(tf.keras.Model):
         self.weight_decay = weight_decay
         self.train_batch_size = train_batch_size
         self.batch_size = batch_size
+        self.tokenizer_run = tokenizer_run
 
         assert train_batch_size % batch_size == 0, "Train batch size must be divisible by batch size"
         #compute how many batches should be computed before updating weights
@@ -213,7 +218,7 @@ class DiffusionModel(tf.keras.Model):
 
     def improve_images_test(self, ideal_images, diffusion_steps):
         """Blur images, then improve them, and return both"""
-        blurry_images = self.blur_images(ideal_images)
+        blurry_images = self._blur_images(ideal_images)
         return blurry_images, self.improve_images(blurry_images, diffusion_steps)
 
     def denoise_at_random_step(self, inputs, training):
@@ -223,18 +228,18 @@ class DiffusionModel(tf.keras.Model):
         batch_size = tf.shape(ideal_image)[0]
 
         #blur the input image and normalize it
-        blurry_image = self.blur_images(ideal_image)
-        blurry_image_normed = self.normalize_image(blurry_image)
+        blurry_image = self._blur_images(ideal_image)
+        blurry_image_normed = self._normalize_image(blurry_image)
 
         #compute the edges and normalize them = the signal we want to predict
-        edges = self.normalize_edges(ideal_image - blurry_image)
+        edges = self._normalize_edges(ideal_image - blurry_image)
         #initial noise values
         noises = tf.random.normal(shape=(batch_size, self.img_size, self.img_size, 3))
 
         # sample uniform random diffusion times
         diffusion_times = tf.random.uniform([batch_size], minval=0.0, maxval=1.0)
         # get noise and signal rates according to the schendule
-        noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
+        noise_rates, signal_rates = self._diffusion_schedule(diffusion_times)
 
         # mix the edge images (the signal) with noises accordingly
         noisy_images = signal_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * edges + noise_rates[:, tf.newaxis, tf.newaxis, tf.newaxis] * noises
@@ -277,16 +282,9 @@ class DiffusionModel(tf.keras.Model):
 
     @staticmethod
     def load(path):
-        """Load a DiffusionModel from the givne file"""
+        """Load a DiffusionModel from the given file"""
 
-        # Custom loading function to fix tensorflow errors
-        def load_diffusion_model(*args, **kwargs):
-            kwargs.pop("layers")
-            kwargs.pop("input_layers")
-            kwargs.pop("output_layers")
-            return DiffusionModel(*args, **kwargs, train_batch_size=2, batch_size=2)
-
-        model = tf.keras.models.load_model(path, custom_objects={"DiffusionModel":load_diffusion_model, "VQVAEModel":VQVAEModel})
+        model = tf.keras.models.load_model(path, custom_objects=DiffusionModel.custom_objects())
 
         #a.save_weights("sharpen_weights.h5")
 
@@ -301,7 +299,7 @@ class DiffusionModel(tf.keras.Model):
     @staticmethod
     def new(args):
         """Create a new diffusion model from the given commandline arguments"""
-        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.weight_decay, args.train_batch_size, args.batch_size)
+        return DiffusionModel(args.img_size, args.block_filter_counts, args.residual_block_count, args.noise_embed_dim, args.weight_decay, args.train_batch_size, args.batch_size, args.tokenizer_run)
 
     def get_config(self):
         return super().get_config() | {
@@ -311,8 +309,19 @@ class DiffusionModel(tf.keras.Model):
             "noise_embed_dim":self.noise_embed_dim,
             "weight_decay":self.weight_decay,
             "train_batch_size":self.train_batch_size,
-            "batch_size": self.batch_size
+            "batch_size": self.batch_size,
+            "tokenizer_run": self.tokenizer_run
         }
+
+    @staticmethod
+    def custom_objects():
+            # Custom loading function to fix tensorflow errors
+        def load_diffusion_model(*args, **kwargs):
+            kwargs.pop("layers")
+            kwargs.pop("input_layers")
+            kwargs.pop("output_layers")
+            return DiffusionModel(*args, **kwargs)
+        return {"DiffusionModel":load_diffusion_model} | VQVAEModel.custom_objects()
 # pylint: enable=abstract-method
 
 
@@ -325,6 +334,8 @@ def main(args):
 
     # create and compile the model
     model = DiffusionModel.new(args)
+
+    tf.keras.utils.plot_model(model, show_shapes=True, show_layer_activations=True)
 
     #create a train, development and show datasets
     image_loading = ImageLoading(args.dataset_location, args.img_size, scale_down=1, shuffle_buffer=128)

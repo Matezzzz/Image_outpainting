@@ -9,11 +9,11 @@ import gzip
 import tensorflow as tf
 from PIL import Image
 import numpy as np
+import scipy.signal
 
 from log_and_save import WandbLog
 from utilities import open_image, get_dataset_location
 from tf_utilities import tf_init
-
 
 parser = argparse.ArgumentParser()
 
@@ -33,7 +33,7 @@ class ImageLoading:
 
 
     """Can load the dataset for multiple places and prepare the images for training"""
-    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, darkness_threshold=0.2, stddev_threshold=0.05, shuffle_buffer=1024):
+    def __init__(self, dataset_location, dataset_image_size, *, scale_down = 4, darkness_threshold=0.2, stddev_threshold=0.05, monochrome_keep=0.1, shuffle_buffer=1024):
         """Create a dataset with the given properties"""
         dataset_location = get_dataset_location(dataset_location)
 
@@ -41,7 +41,7 @@ class ImageLoading:
         load_image_size = np.array([1200, 1600]) // scale_down
 
         #create the full image dataset
-        self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, darkness_threshold, stddev_threshold, shuffle_buffer)
+        self.full_dataset = self._create_dataset(dataset_location, load_image_size, dataset_image_size, darkness_threshold, stddev_threshold, monochrome_keep, shuffle_buffer)
 
 
     @classmethod
@@ -86,15 +86,14 @@ class ImageLoading:
 
 
     @classmethod
-    def _create_boxes(cls, mask, load_image_size, dataset_image_size):
+    def _create_boxes(cls, mask, dataset_image_size):
         """Create image boxes that do not overlap the mask"""
-        #go over all positions, keep each where the box doesn't overlap with the mask
-        boxes = np.array([
-            [y, x]
-            for y in range(load_image_size[0] - dataset_image_size)
-            for x in range(load_image_size[1] - dataset_image_size)
-            if np.sum(mask[y:y+dataset_image_size, x:x+dataset_image_size]) == 0
-        ])
+        def conv2d(image, kernel):
+            return scipy.signal.convolve2d(image, kernel, 'valid')
+        #True if a mask can be placed at a position and no pixel will be part of the environment
+        valid_positions = conv2d(conv2d(mask.astype(np.uint8), np.ones([1, dataset_image_size])), np.ones([dataset_image_size, 1])) == 0
+        #get all valid box starting positions
+        boxes = np.stack(np.where(valid_positions), 1)
         return boxes
 
 
@@ -110,7 +109,7 @@ class ImageLoading:
         return img
 
 
-    def _create_dataset_internal(self, dataset_location, fname_dataset, data_boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold):
+    def _create_dataset_internal(self, dataset_location, fname_dataset, data_boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold, monochrome_keep):
         """Create the dataset for a given place"""
 
         width, height = load_image_size[1], load_image_size[0]
@@ -143,7 +142,7 @@ class ImageLoading:
             #average standard deviation
             stddev = tf.reduce_mean(tf.abs(img - mean))
             #keep all interesting images + 10% of the monochrome ones
-            return tf.logical_or(stddev > stddev_threshold, tf.random.uniform([]) < 0.1)
+            return tf.logical_or(stddev > stddev_threshold, tf.random.uniform([]) < monochrome_keep)
 
         #go over all available images, select a random area from them, remove all dark images and most monochrome ones
         return fname_dataset\
@@ -153,7 +152,7 @@ class ImageLoading:
             .filter(delete_monochrome)
 
 
-    def _create_dataset(self, dataset_location, load_image_size, box_image_size, darkness_threshold, stddev_threshold, shuffle_buffer=1024):
+    def _create_dataset(self, dataset_location, load_image_size, box_image_size, darkness_threshold, stddev_threshold, monochrome_keep, shuffle_buffer=1024):
         """Create a dataset for multiple places"""
 
         #load all masks and image filenames
@@ -164,9 +163,9 @@ class ImageLoading:
         #resize each mask to the load_image_size
         masks = [np.asarray(Image.fromarray(mask).resize((load_image_size[1], load_image_size[0]))) for mask in masks]
         #generate suitable boxes for each mask, and convert them to a tf.constant
-        boxes = tf.ragged.constant([self._create_boxes(mask, load_image_size, box_image_size) for mask in masks])
+        boxes = tf.ragged.constant([self._create_boxes(mask, box_image_size) for mask in masks])
         #create the full dataset
-        dataset = self._create_dataset_internal(dataset_location, fname_dataset, boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold)
+        dataset = self._create_dataset_internal(dataset_location, fname_dataset, boxes, load_image_size, box_image_size, darkness_threshold, stddev_threshold, monochrome_keep)
 
         #shuffle if required
         if shuffle_buffer != 0:

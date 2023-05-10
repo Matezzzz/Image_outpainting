@@ -60,7 +60,7 @@ class TrainingLog(tf.keras.callbacks.Callback):
     def __init__(self, dev_dataset, test_dataset, log_frequency, test_frequency, validation_frequency=None, train_batch_size = None, learning_rate_decay = None):
         super().__init__()
         self.dev_dataset = dev_dataset
-        self.test_dataset = iter(test_dataset.repeat(None))
+        self.test_dataset = iter(test_dataset.repeat())
 
         self.log_frequency = log_frequency
         self.test_frequency = test_frequency
@@ -98,7 +98,7 @@ class TrainingLog(tf.keras.callbacks.Callback):
             #log everything
             self.log.commit()
         self.batches_processed += 1
-        
+
         return super().on_batch_end(batch, logs)
 
     @property

@@ -181,7 +181,7 @@ class MaskGIT(tf.keras.Model):
         shape = tf.shape(logits)
         return tf.reshape(logits, [shape[0], *self.input_size_dims, shape[2]])
 
-    def test_decode(self, input_tokens, decode_steps, generation_temperature):
+    def test_decode(self, input_tokens, decode_steps, generation_temperature, token_mask = None):
         """Use the model to generate masked tokens using multiple steps and given generation temperature"""
         tokens = self._reshape_to_seq(input_tokens)
         #final token logits
@@ -191,7 +191,7 @@ class MaskGIT(tf.keras.Model):
         #go over all decode steps
         for i in range(decode_steps):
             #do a decode steps - make a guess at a few tokens
-            write_mask, sampled_tokens, logits = self._decode_step(tokens, unknown_counts, i, decode_steps, generation_temperature)
+            write_mask, sampled_tokens, logits = self._decode_step(tokens, unknown_counts, i, decode_steps, generation_temperature, token_mask)
             #save the tokens and logits generated during the current step
             tokens = tf.where(write_mask, sampled_tokens, tokens)
             token_logits = tf.where(write_mask[:, :, tf.newaxis], logits, token_logits)
@@ -206,13 +206,16 @@ class MaskGIT(tf.keras.Model):
         """Compute the fraction of masked tokens according to the cosine schedule from the MaskGIT article"""
         return tf.math.cos(np.pi / 2 * mask_ratio)
 
-    def _decode_step(self, tokens, initial_unknown_counts, step_i, decode_steps, generation_temperature):
+    def _decode_step(self, tokens, initial_unknown_counts, step_i, decode_steps, generation_temperature, token_mask = None):
         """Perform one decoding step - figure out the most probable tokens to write during this step"""
         batch_size = tf.shape(tokens)[0]
         token_count = self.token_count
 
         #make the model predict the logits of all tokens for all masked positions
         logits = self(tokens, training=False)
+        if token_mask is not None:
+            logits = tf.where(token_mask, logits, -np.inf)
+
 
         unknown_tokens = tokens == MASK_TOKEN
 
@@ -369,9 +372,9 @@ class MaskGIT(tf.keras.Model):
         """Use the model to predict masked tokens using the simple method"""
         return self.from_tokens(self.test_decode_simple(tokens)[0])
 
-    def decode_img(self, tokens, decode_steps, generation_temperature):
+    def decode_img(self, tokens, decode_steps, generation_temperature, token_mask = None):
         """Use the model to predict masked tokens using multiple decoding steps"""
-        return self.from_tokens(self.test_decode(tokens, decode_steps, generation_temperature)[0])
+        return self.from_tokens(self.test_decode(tokens, decode_steps, generation_temperature, token_mask)[0])
 
     @staticmethod
     def _mask_tokens(tokens, mask):
@@ -386,9 +389,7 @@ class MaskGIT(tf.keras.Model):
     @staticmethod
     def load(dirname) -> "MaskGIT":
         """Load MaskGIT from a filename"""
-        return tf.keras.models.load_model(dirname, custom_objects={
-            "MaskGIT":MaskGIT, "VQVAEModel":VQVAEModel, "BiasLayer":BiasLayer, "TokenEmbedding":TokenEmbedding
-        })
+        return tf.keras.models.load_model(dirname, custom_objects=MaskGIT.custom_objects())
 
     @staticmethod
     def new(args : argparse.Namespace):
@@ -406,6 +407,15 @@ class MaskGIT(tf.keras.Model):
             "mask_ratio": self.mask_ratio,
             "tokenizer_run": self.tokenizer_run
         }
+
+    @staticmethod
+    def custom_objects():
+        def maskgit_load(*args2, **kwargs):
+            kwargs.pop("layers")
+            kwargs.pop("input_layers")
+            kwargs.pop("output_layers")
+            return MaskGIT(*args2, **kwargs)
+        return {"MaskGIT":maskgit_load, "BiasLayer":BiasLayer, "TokenEmbedding":TokenEmbedding} | VQVAEModel.custom_objects()
 # pylint: enable=abstract-method
 
 

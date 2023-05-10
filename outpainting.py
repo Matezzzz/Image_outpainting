@@ -26,26 +26,27 @@ parser.add_argument("--threads", default=8, type=int, help="Maximum number of th
 parser.add_argument("--img_size", default=128, type=int, help="Input image size")
 parser.add_argument("--batch_size", default=2, type=int, help="Batch size.")
 parser.add_argument("--attempt_count", default=4, type=int, help="How many times to repeat outpainting for one input image.")
-parser.add_argument("--example_count", default=10, type=int, help="How many times to do the outpainting on a batch")
-parser.add_argument("--outpaint_range",default=2, type=int, help="How many times to outpaint in each direction")
-parser.add_argument("--generation_temp",default=8.0, type=float, help="How random should the generation be. Not used for simple decoding.")
-parser.add_argument("--samples", default=4, type=int, help="Rendering samples")
+parser.add_argument("--example_count", default=2, type=int, help="How many times to do the outpainting on a batch")
+parser.add_argument("--outpaint_range",default=1, type=int, help="How many times to outpaint in each direction")
+parser.add_argument("--generation_temp",default=4.0, type=float, help="How random should the generation be. Not used for simple decoding.")
+parser.add_argument("--samples", default=2, type=int, help="Rendering samples")
 parser.add_argument("--decoding",default="full", type=str, help="What decoding method to use, simple/full")
 
 parser.add_argument("--maskgit_steps", default=12, type=int, help="Steps during maskgit generation")
 parser.add_argument("--diffusion_steps", default=50, type=int, help="Steps during diffusion model upscaling")
 
-parser.add_argument("--generate_upsampled", default=True, type=bool, help="Whether to generate upscaled images")
+parser.add_argument("--sides_only", default=False, type=bool, help="Whether to generate only to the sides or in all directions")
+parser.add_argument("--generate_upsampled", default=False, type=bool, help="Whether to generate upscaled images")
 
-parser.add_argument("--maskgit_run", default="203", type=str, help="The maskgit version to use")
+parser.add_argument("--maskgit_run", default="", type=str, help="The maskgit version to use")
 parser.add_argument("--sharpen_run", default="", type=str, help="The sharpener/upscaler version to use")\
 
 parser.add_argument("--outpaint_step", default=0.5, type=float, help="The step to use during token generation and upsampling")
 
 
 
-parser.add_argument("--dataset_location", default="", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
-parser.add_argument("--dataset_outpaint_only", default=False, type=bool, help="Whether the specified dataset is used only for outpainting (just contains images to expand) or whether it contains raw data")
+parser.add_argument("--dataset_location", default="outpaint/comparison", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
+parser.add_argument("--dataset_outpaint_only", default=True, type=bool, help="Whether the specified dataset is used only for outpainting (just contains images to expand) or whether it contains raw data")
 
 
 
@@ -149,6 +150,7 @@ class OutpaintingInfo:
 
     def __init__(self, args : argparse.Namespace, maskgit : MaskGIT):
         self.image_size = args.img_size
+        self.sides_only = args.sides_only
 
         self.outpaint_range = args.outpaint_range
 
@@ -168,6 +170,56 @@ class OutpaintingInfo:
 
         #size of the upscaled & outpainted image
         self.outpainted_upscaled_image_size = 4 * self.outpainted_image_size
+
+        self.samples = args.samples
+
+    @property
+    def known_tokens_pos(self):
+        """Return the middle of the outpainted tokens"""
+        return np.array([0 if self.sides_only else self.outpainting_total_tokens, self.outpainting_total_tokens])
+
+    def token_outpaint_generator(self):
+        """The generator to use when outpainting - returns middles of all outpainting positions"""
+        if self.sides_only:
+            #go on a line at the center, back and forth
+            return np.array([
+                [self.image_size_tokens // 2, self.outpainted_image_middle_tokens - k * (i+1) * self.outpaint_step_tokens]
+                for k in [-1, 1] for i in range(self.outpaint_range)
+            ])
+        return SpiralGenerator(self.outpaint_range, self.outpainted_image_middle_tokens, self.outpaint_step_tokens)
+
+    def decode_generator(self):
+        """The generator to use when decoding - either samples on a line or on a grid, for generating sides or all directions respectively"""
+        if self.sides_only:
+            steps = (self.outpaint_range+1) * self.samples
+            return np.stack([
+                np.zeros(steps, np.int32),
+                np.linspace(0, 2 * self.outpainting_total_tokens, steps, dtype=np.int32)
+            ], 1)
+        return GridGenerator(2*self.outpainting_total_tokens, (self.outpaint_range+1) * self.samples)
+
+    def upscale_image_generator(self):
+        """The generator to use when upscaling"""
+        outpainting_total_both_sides = 2 * self.outpainting_total
+        steps = int(np.ceil(self.outpainted_image_size * 1.25 / self.image_size))
+        if self.sides_only:
+            return np.stack([
+                np.zeros(steps, np.int32),
+                np.linspace(0, outpainting_total_both_sides, steps, dtype=np.int32)
+            ], 1)
+        return GridGenerator(outpainting_total_both_sides, steps)
+
+    @property
+    def outpainted_image_height_tokens(self):
+        return self.image_size_tokens if self.sides_only else self.outpainted_image_size_tokens
+
+    @property
+    def outpainted_image_height(self):
+        return self.image_size if self.sides_only else self.outpainted_image_size
+
+    @property
+    def outpainted_upscaled_image_height(self):
+        return self.upscaled_image_size if self.sides_only else self.outpainted_upscaled_image_size
 
 
 def get_slice(data, data_from, data_size):
@@ -200,12 +252,17 @@ def outpaint_tokens(source_tokens, maskgit : MaskGIT, info : OutpaintingInfo, de
     """
 
     #the array we will fill with the outpainted tokens
-    outpainted_tokens = np.full([source_tokens.shape[0], info.outpainted_image_size_tokens, info.outpainted_image_size_tokens], MASK_TOKEN, dtype=np.int32)
+    outpainted_tokens = np.full([source_tokens.shape[0], info.outpainted_image_height_tokens, info.outpainted_image_size_tokens], MASK_TOKEN, dtype=np.int32)
     #save the tokens of the original image at the center
-    set_slice(outpainted_tokens, info.outpainting_total_tokens, info.image_size_tokens, source_tokens)
+    set_slice(outpainted_tokens, info.known_tokens_pos, info.image_size_tokens, source_tokens)
+
+    token_mask = np.ones([128], bool)
+    banned_tokens = [64, 68, 71, 80, 95, 98]
+    token_mask[banned_tokens] = False
+    token_mask = tf.constant(token_mask)
 
     #start near the middle, where the original tokens are placed, and gradually continue outwards
-    for pred_pos in GeneratorProgressBar(SpiralGenerator(info.outpaint_range, info.outpainted_image_middle_tokens, info.outpaint_step_tokens)):
+    for pred_pos in GeneratorProgressBar(info.token_outpaint_generator()):
         outpaint_from = pred_pos - info.image_size_tokens//2
         #get tokens that serve as current input to maskgit
         input_tokens = get_slice(outpainted_tokens, outpaint_from, info.image_size_tokens)
@@ -217,7 +274,7 @@ def outpaint_tokens(source_tokens, maskgit : MaskGIT, info : OutpaintingInfo, de
             if decoding == "simple":
                 new_tokens = maskgit.test_decode_simple(input_tokens)[0]
             elif decoding == "full":
-                new_tokens = maskgit.test_decode(input_tokens, decoding_steps, generation_temperature)[0]
+                new_tokens = maskgit.test_decode(input_tokens, decoding_steps, generation_temperature, token_mask)[0]
             else:
                 raise NotImplementedError()
 
@@ -237,19 +294,21 @@ def outpaint_tokens(source_tokens, maskgit : MaskGIT, info : OutpaintingInfo, de
                 best_tokens = tf.where((scores > best_scores)[:, tf.newaxis, tf.newaxis], new_tokens, best_tokens)
                 best_scores = tf.maximum(best_scores, scores)
         #replace all undefined tokens with the best tokens instead
+
         input_tokens[...] = np.where(input_tokens == MASK_TOKEN, best_tokens, input_tokens)
 
         #set_slice(outpainted_tokens, outpaint_from, info.image_size_tokens, np.where(input_tokens == MASK_TOKEN, best_tokens, input_tokens))
+    #print (f"Result: {np.mean(outpainted_tokens==MASK_TOKEN)}")
     return outpainted_tokens
 
 
-def decode_outpainted_tokens(outpainted_tokens, maskgit : MaskGIT, info : OutpaintingInfo, samples):
+def decode_outpainted_tokens(outpainted_tokens, maskgit : MaskGIT, info : OutpaintingInfo):
     """
     Convert the outpainted tokens to an image
     """
 
     #size of the image after decoding
-    decoded_size = np.array([tf.shape(outpainted_tokens)[0], info.outpainted_image_size, info.outpainted_image_size])
+    decoded_size = np.array([tf.shape(outpainted_tokens)[0], info.outpainted_image_height, info.outpainted_image_size])
     #output image = sum of rendering results, weighed by blending weights
     output_image = np.zeros([*decoded_size, 3])
     #blending sum = sum of blending weights for each pixel
@@ -257,13 +316,13 @@ def decode_outpainted_tokens(outpainted_tokens, maskgit : MaskGIT, info : Outpai
 
     blend_range = np.arange(1, info.image_size+1)
     #blending value = distance from the border. Used to mix multiple samples during rendering
-    blending = np.minimum(
-        np.minimum(blend_range, blend_range[::-1])[:, np.newaxis],
-        np.minimum(blend_range, blend_range[::-1])[np.newaxis, :]
-    )[:, :, np.newaxis]
+    blending = np.minimum(blend_range, blend_range[::-1])[np.newaxis, :]
+    if not info.sides_only:
+        blending = np.minimum(blending, np.minimum(blend_range, blend_range[::-1])[:, np.newaxis],)
+    blending = blending[:, :, np.newaxis]
 
     #for all samples on a grid
-    for render_from in GeneratorProgressBar(GridGenerator(2*info.outpainting_total_tokens, info.outpaint_range * samples)):
+    for render_from in GeneratorProgressBar(info.decode_generator()):
         #convert the rectangle at current position to an image
         colors = maskgit.from_tokens(get_slice(outpainted_tokens, render_from, info.image_size_tokens))
 
@@ -287,18 +346,15 @@ def upscale_image(image, upscaling_model : DiffusionModel, info : OutpaintingInf
     """
 
     #size of the resulting image
-    outpainted_image_size = info.outpainted_upscaled_image_size
-    final_image_shape = [tf.shape(image)[0], outpainted_image_size, outpainted_image_size]
+    final_image_shape = [tf.shape(image)[0], info.outpainted_upscaled_image_height, info.outpainted_upscaled_image_size]
 
     #the upscaled image
     final_image = np.zeros([*final_image_shape, 3])
     #True for the pixels that were upscaled already
     final_image_mask = np.zeros([*final_image_shape, 1], bool)
 
-    outpainting_total_both_sides = 2 * info.outpainting_total
-
     #go over all positions in the small image
-    for upscale_from in GeneratorProgressBar(GridGenerator(outpainting_total_both_sides, int(np.ceil(info.outpainted_image_size * 1.25 / info.image_size)))):
+    for upscale_from in GeneratorProgressBar(info.upscale_image_generator()):
         #get the image part
         inp_img = get_slice(image, upscale_from, info.image_size)
 
@@ -318,8 +374,6 @@ def upscale_image(image, upscaling_model : DiffusionModel, info : OutpaintingInf
     return final_image
 
 
-
-
 def main(args):
     #set up tensorflow to use the specified GPU, number of threads, and seed
     tf_init(args.use_gpu, args.threads, args.seed)
@@ -332,11 +386,12 @@ def main(args):
 
     #use just a dataset of loaded images if needed
     if args.dataset_outpaint_only:
-        dataset = tf.keras.utils.image_dataset_from_directory(args.dataset_location, labels=None, batch_size=args.batch_size,
+        dataset = tf.keras.utils.image_dataset_from_directory("outpaint", labels=None, batch_size=args.batch_size,
                                                               image_size=(args.img_size, args.img_size), shuffle=False)
+        dataset = dataset.map(lambda x: x / 255.0)
     else:
         #load the image dataset with a given batch size
-        dataset = ImageLoading(args.dataset_location, args.img_size, stddev_threshold=0.1).create_dataset(args.batch_size)
+        dataset = ImageLoading(args.dataset_location, args.img_size, stddev_threshold=0.1, monochrome_keep=0.0, shuffle_buffer=0).create_dataset(args.batch_size)
 
     #start wandb for logging
     WandbLog.wandb_init("image_outpainting_results", args)
@@ -369,7 +424,7 @@ def main(args):
 
         print(f" * {'Rendering:': <20} ", end="", flush=True)
         #convert the outpainted tokens back to an image
-        outpainted_image = decode_outpainted_tokens(outpainted_tokens, maskgit, outpaint_info, args.samples)
+        outpainted_image = decode_outpainted_tokens(outpainted_tokens, maskgit, outpaint_info)
 
         #prepare images for being logged to wandb
         log = WandbLog().log_images("Images", batch).log_images("Outpainted low resolution", outpainted_image)
