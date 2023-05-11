@@ -28,7 +28,7 @@ After this, we hide the~CHMI logo by masking a~$270 \times 115$ rectangle in the
 
 During daytime with bright skies, this generally produces an~acceptable mask, with just a~few mistakes, such as masked parts of clouds and missing masks over patches of the~landscape of the~same color. To fix these issues, we compute separate masks for a~hundred consecutive time steps from one day (starting at noon so most time steps are bright enough to distinguish details). Then, for each pixel, we compute the~largest consecutive amount of time steps it has been marked as an~edge and the~percentage of the~total time it was an~edge. For an~edge to be in the~final mask, the~consecutive amount must be above a~certain threshold, and the~percentage must be above another threshold.
 
-We didn't manage to find thresholds that would work well for all locations and weather conditions, so we instead chose the~thresholds manually for all locations. The~final segmentation masks are presented in \figref{segmentation_final}.
+We didn't manage to find thresholds that would work well for all locations and weather conditions, so we instead chose the~thresholds manually for all locations. The~final segmentation masks are presented in \figref{segmentation_final}. We provide the final masks for all locations as an attachment [\ref{attachment_masks}].
 
 \figureimg{segmentation_final}{Final segmentation. We show one sample image, the~resulting mask, and the~image with mask overlay for one location, Brno.}
 

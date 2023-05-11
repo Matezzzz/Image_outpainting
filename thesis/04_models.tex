@@ -11,6 +11,8 @@ Our outpainting algorithm consists of three distinct models - a~VQVAE tokenizer,
 
 During outpainting, we use the~models as follows - first, we get the~image we are trying to extend, pass it through the~tokenizer encoder, receiving a~set of tokens. After that, we repeatedly call the~MaskGIT model, generating feasible tokens surrounding the~original image, until a~specified size is reached. When we are done, we use the~tokenizer decoder to convert the~tokens back to an~image, which is then upscaled using the~super sampler to create the~final result. The~process is described in more detail later in the~next chapter.
 
+All trained models are provided as thesis attachments [\ref{attachment_models}].
+
 
 \section{Tokenizer}
 
