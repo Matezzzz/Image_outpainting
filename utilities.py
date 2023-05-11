@@ -60,6 +60,11 @@ def save_image(fname, image):
     """Save the given image with the given filename"""
     Image.fromarray(image).save(fname)
 
+def save_images(fname, images):
+    """Save all images as 'fname_{i}.png, where i are the indices of individual images"""
+    for i, img in enumerate(images):
+        save_image(f"{fname}_{i}.png", img)
+
 def load_images(pattern):
     """Generator that loads all images matching a given glob pattern"""
     return LoadImagesGenerator(pattern)

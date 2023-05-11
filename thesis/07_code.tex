@@ -1,6 +1,6 @@
 \chapter{Code} \label{code}
 
-We chose Python 3.10.9 as the~main language for implementing this project, due to its popularity in the~area of machine learning and the~high quality frameworks available. We make the~project available on \textcolor{red}{\href{https://github.com/Matezzzz/Image_outpainting}{GitHub}}, and use the~following libraries:
+We chose Python 3.10.9 as the~main language for implementing this project due to its popularity in the~area of machine learning and the~high quality frameworks available. We make the~project available on \textcolor{red}{\href{https://github.com/Matezzzz/Image_outpainting}{GitHub}}, and use the~following libraries:
 
 \begin{itemize}
     \item \textbf{Tensorflow 2.11.1} \citep{tensorflow} - The~main machine learning library we use. For defining all models, and their training.
@@ -11,7 +11,7 @@ We chose Python 3.10.9 as the~main language for implementing this project, due t
     \item \textbf{Opencv-python 4.7.0.72} \citep{opencv_python} - An~image processing library. We use it during image segmentation
     \item \textbf{Scikit-image 0.20.0} \citep{scikit_image} - An~image processing library. We use it during image segmentation
     \item \textbf{Paramiko 3.1.0} \citep{paramiko} - a~library for SSH communication. We use it for fecthing location data from a~server when creating segmentation masks.
-    \item \textbf{Scipy} \citep{scipy} - A library for scientific computing. We use it during dataset creation.
+    \item \textbf{Scipy 1.10.1} \citep{scipy} - A library for scientific computing. We use it during dataset creation.
 \end{itemize}
 
 
@@ -22,12 +22,12 @@ We follow up with a~short guide for installing the~required libraries, then we d
 We provide a~short guide that should fit all users below:
 
 \begin{enumerate}
-    \item Install a~compatible version of Python. 3.10.9 is recommended. We suggest using a~virtual environment for the~following steps - \cite{anaconda} is recommended, but any other environment manager should work.
-    \item Install Tensorflow 2.11. The~process for installing the~GPU version is quite arduous, since it requires installing CUDA and other libraries. Refer to the~guide at \textcolor{red}{\href{https://www.tensorflow.org/install}{the tensorflow website}} for more information.
-    \item Install all other python libraries. This can be done simply by using the~command \texttt{pip install numpy tensorflow-probability Pillow wandb python-opencv scikit-image paramiko scipy}. If any package-specific problems occur, specify the~exact version.
+    \item Install a~compatible version of Python, 3.10 is recommended. We suggest using a~virtual environment for the~following steps - we used \cite{anaconda}, but any other environment manager should work.
+    \item Install Tensorflow 2.11. The~process for installing the~GPU version is quite arduous, since it requires installing CUDA and other libraries. Refer to the~guide at \textcolor{red}{\href{https://www.tensorflow.org/install}{the tensorflow website}} for more information. Make sure to install the correct version, it is unlikely that the saved models will work otherwise.
+    \item Install all other python libraries. This can be done simply by using the~command \texttt{pip install numpy tensorflow-probability Pillow wandb python-opencv scikit-image paramiko scipy}. If any package-specific problems occur, specify the exact version according to the previous section.
 \end{enumerate}
 
-Before running the~project, we recommend downloading the~models provided as \texttt{.zip} attachments, namely the~MaskGIT and the~super sampler. Extract the~zip files and place them in the~\texttt{models/maskgit} and \texttt{models/sharpen} folders respectively. It is also possible to train the~models from scratch according to the~guide provided in section \textcolor{red}{\ref{running_training}}.
+Before running the~project, we recommend downloading all three provided models as \texttt{.zip} attachments. Extract the~zip files and place them in the~\path{models/tokenizer_228}, \path{models/maskgit} and \path{models/sharpen} folders respectively. It is also possible to train the~models from scratch according to the~guide provided in section \textcolor{red}{\ref{running_training}}.
 
 
 \section{Architecture}
@@ -50,24 +50,24 @@ Before delving into how to run the~code, we describe which parts of the~project 
     \item \textcolor{orange}{\texttt{segmentation.py}} Create segmentation masks
 
     \item \textcolor{blue}{\texttt{./masks}} Contains masks for all locations. During training, only the~locations from here will be used.
-    \item \textcolor{blue}{\texttt{./data}} During the~first run, we search for all training data matching \texttt{(dataset\_location)/place/*/*.jpg}, where place has an~available mask at \texttt{./masks/(place)\_mask.png}. This creates two files, \texttt{./data/masks.npy.gz}, and \texttt{masks/filename\_dataset.data}, which will be used in all subsequent runs
+    \item \textcolor{blue}{\texttt{./data}} During the~first run, we search for all training data matching \path{(dataset_location)/place/*/*.jpg}, where place has an~available mask at \texttt{./masks/(place)\_mask.png}. This creates two files, \path{./data/masks.npy.gz}, and \path{masks/filename_dataset.data}, which will be used in all subsequent runs
     \item \textcolor{blue}{\texttt{./models}} All models will be loaded from or saved to this directory
-    \item \textcolor{blue}{\texttt{(dataset\_location)}} Specified as a~parameter - defines the~location of all training images
+    \item \textcolor{blue}{\texttt{./outpaint}} Stores images to outpaint
+    \item \textcolor{blue}{\texttt{(dataset\_location)}} Specified as a~parameter - defines the~location of all training images.
 \end{itemize}
 
 
 \section{Running scripts}
 
-We use weights and biases library \citep{wandb} for visualising the~results. When running a~script for the~first time, you will be prompted to either run in anonymous mode, in which case the~results of the~run will be stored for a~week, or to create an~account to store them for longer. 
+We use the weights and biases library \citep{wandb} for visualising the~results. When running a~script for the~first time, you will be prompted to either run in anonymous mode, in which case the~results of the~run will be stored for a~week, or to create an~account to store them for longer. 
 
-Before we go through all the~scripts to describe how to run them, we list some parameters shared between multiple scripts, for clarity. In all listings, we display parameters that require additional care as \textcolor{red}{red}.
+Before we go through all the~scripts to describe how to run them, we list some parameters shared between multiple scripts, for clarity:
 \begin{itemize}
-    \item \texttt{--use\_gpu} The~GPU to use, if multiple are present in the~system
+    \item \texttt{--use\_gpu} An~index of the~GPU to use, if multiple are present in the~system
     \item \texttt{--seed} The~random seed
     \item \texttt{--threads} CPU threads tensorflow can use
-    \item \texttt{--img\_size} Size of input images. If any model is being loaded in this script, the~size must match
+    \item \texttt{--img\_size} Size of input images. It is recommended to leave it as default, so that it is compatible with the provided models.
     \item \texttt{--batch\_size} The~size of batch
-    \item \textcolor{red}{\texttt{--dataset\_location}} Where the~data is found. The~path to each image should match \texttt{dataset\_location/*/*/*.jpg"}, corresponding to \texttt{dataset\_location/(place)/time/*.jpg}. If no value is specified, the~value of the~\texttt{IMAGE\_OUTPAINTING\_DATASET\_LOCATION} environment variable is used. Since the~data is assumed to be raw webcam data, for it to be used, a~mask of matching name, \texttt{./masks/(place)\_mask.png} must be present. During outpainting, there is an~additional parameter to support using images in a~folder, without masks, while still using this path.
 \end{itemize}
 
 
@@ -76,7 +76,7 @@ Before we go through all the~scripts to describe how to run them, we list some p
 
 
 
-Outpainting is implemented in the~\texttt{outpainting.py} file. It is assumed that there are already trained MaskGIT and super sampler models in the~\texttt{models} directory. It takes in images as input, produces outpainted images, and logs them to weights and biases. It takes the~following arguments (marked in \textcolor{red}{red} are those requiring some attention):
+Outpainting is implemented in the~\texttt{outpainting.py} file. It is assumed that there are already trained tokenizer, MaskGIT and super sampler models in the~\texttt{models} directory. It takes in images as input, produces outpainted images, and logs them to weights and biases. It takes the~following arguments:
 \begin{itemize}
     \item \texttt{--attempt\_count} How many examples to produce for one input image
     \item \texttt{--example\_count} How many images to process, at most
@@ -87,11 +87,12 @@ Outpainting is implemented in the~\texttt{outpainting.py} file. It is assumed th
     \item \texttt{--maskgit\_steps}, =\texttt{decoding\_steps} to use when outpainting tokens
     \item \texttt{--diffusion\_steps} how many steps to use when upscaling
     \item \texttt{--generate\_upsampled} whether to use the~super sampler
-    \item \texttt{--maskgit\_run} the~name of the~MaskGIT model to use. It should exist at the~path \texttt{./models/maskgit\_(maskgit\_run)}. The~provided model will be loaded without specifying this parameter.
-    \item \texttt{--sharpen\_run} the~name of the~super sampler model to use. It should exist at the~path \texttt{./models/sharpen\_(sharpen\_run)}. The~provided model will be loaded without specifying this parameter.
+    \item \texttt{--maskgit\_run} the~name of the~MaskGIT model to use. It should exist at the~path \path{./models/maskgit_(maskgit_run)}. The~provided model will be loaded without specifying this parameter.
+    \item \texttt{--sharpen\_run} the~name of the~super sampler model to use. It should exist at the~path \path{./models/sharpen_(sharpen_run)}. The~provided model will be loaded without specifying this parameter.
     \item \texttt{--outpaint\_step} What part of the~image to fill when outpainting during one step. Should match the~one specified in MaskGIT.
-    \item \textcolor{red}{\texttt{--dataset\_outpaint\_only}} when set as true, the~\texttt{--dataset\_location} will be assumed to contain images directly, instead of training data which needs to be segmented first. These images will be rescaled to $128 \times 128$ and then used for outpainting.
-    \item \texttt{--sides_only} If true, outpainting will only be performed to the left and right, not upwards and downwards.
+    \item \texttt{--dataset\_outpaint\_only} when set as true, the~\texttt{--dataset\_location} will be assumed to contain images directly, instead of training data which needs to be segmented first. These images will be rescaled to $128 \times 128$ and then used for outpainting.
+    \item \texttt{--sides\_only} If true, outpainting will only be performed to the left and right, not upwards and downwards.
+    \item \texttt{--dataset\_location} Where the~data is found. If \texttt{dataset\_outpaint\_only} is true, the data is read directly, otherwise the~data is assumed to be raw webcam data and for it to be used, a~mask of matching name must be present at \texttt{./masks/(place)\_mask.png}. By default, the \texttt{./outpaint} folder is used.
 \end{itemize}
 
 
@@ -99,14 +100,14 @@ Outpainting is implemented in the~\texttt{outpainting.py} file. It is assumed th
 
 \subsection{Running training} \label{running_training}
 
-We present a~short guide for training the~models, but we do not provide the~dataset used. Some recent webcam images are available publicly at the~\citep{chmi_webcams}, from where it should be possible to scrape the~data and obtain a~dataset of a~reasonable size over several weeks. For most of the~czech locations, masks are available in the~GitHub repository. We assume that we will be working with these locations only; creating masks for other places will require some small extensions to our code. We present a~brief summary below, then we deal with the~actual training, assuming one has the~data ready.
+We present a~short guide for training the~models, though the dataset is not made available. Some recent webcam images are available publicly at the~CHMI web page \citep{chmi_webcams}, from where it should be possible to scrape the~data and obtain a~dataset of a~reasonable size over several weeks. For most of the~czech locations, masks are available in the~GitHub repository. We assume that we will be working with these locations only, creating masks for other places will require some small extensions to our code. We present a~brief summary below, then we deal with the~actual training, assuming one has the~data ready.
 
 \begin{enumerate}
-    \item We discuss mask creation in this step, it can be skipped when using the~masks for czech locations. The~mask segmentation is performed using the~\texttt{segmentation.py} file. As we ran the~segmentation locally and most of our dataset was on a~remote server, we first fetch images for new locations using SSH, and only then perform the~segmentation. This is the~only supported mode of operation out of the~box. If you need to create masks locally, you can import only the~\texttt{image\_segmentation} method from the~file and use it to compute the~mask. All results should be checked manually before being used in training, as our algorithm can sometimes fail to find the~correct mask when the~weather conditions on a~the day being analyzed are suboptimal. If the~mask is only slightly wrong, you can use the~\texttt{finalize\_masks} method to tweak the~final values for masks created in the~previous steps. All masks and temporary data will be saved in the~\texttt{masks} folder automatically.
+    \item We discuss mask creation in this step, it can be skipped when using the~provided masks for czech locations. The~mask segmentation is performed using the~\texttt{segmentation.py} file. As we ran the~segmentation locally and most of our dataset was on a~remote server, we first fetch images for new locations using SSH, and only then perform the~segmentation. This is the~only supported mode of operation out of the~box. If you need to create masks locally, you can import the~\texttt{image\_segmentation} method from the~file and use it to compute the~mask. All results should be checked manually before being used in training, as our algorithm can sometimes fail to find the~correct mask when the~weather conditions on a~the day being analyzed are suboptimal. If the~mask is only slightly wrong, you can use the~\texttt{finalize\_masks} method to tweak the~final values for masks created in the~previous steps. All masks and temporary data will be saved in the~\texttt{masks} folder automatically.
     
-    \item We recommended running the~\texttt{dataset.py} file to ensure data is loaded as planned and masks are working correctly - it will print how many images were loaded and log some dataset examples to weights and biases. When running for the~first time, it will also go through \texttt{dataset\_location} and match all files with their respective masks, and save the~result, so loading is faster next time.
+    \item We recommended running the~\texttt{dataset.py} file to ensure data is loaded as planned and masks are working correctly - it will print how many images were loaded and log some dataset examples to weights and biases. When running for the~first time, it will also go through \texttt{dataset\_location} and match all files with their respective masks, and save the~result, so loading is faster next time. The data structure should be as follows - When the \texttt{dataset\_location} parameter is provided to the script, the~path to each image should match \path{dataset_location/*/*/*.jpg}, corresponding to \path{dataset_location/(place)/time/*.jpg}. If no parameter value is specified, the~value of the~\texttt{IMAGE\_OUTPAINTING\_DATASET\_LOCATION} environment variable is used.
 
-    \item With the~data prepared in previous steps, we can train a~model. MaskGIT and super sampler require a~trained tokenizer during training, the~tokenizer can be trained immediately. When loading a~tokenizer model during training, it must be available in the~models  \texttt{./models/tokenizer\_(tokenizer\_run)}, where \texttt{tokenizer\_run} should be specified as a~parameter. Each of the~training scripts support multiple different parameters that tweak the~model architecture, losses, and more. To get all supported parameters for a~given training script, you can either call \texttt{python (training\_script\_filename).py --help} from the~command line, or view the~source code directly.
+    \item With the~data prepared in previous steps, we can train a~model. MaskGIT and super sampler require a~trained tokenizer during training, the~tokenizer can be trained immediately. When loading a~tokenizer model during training, it must be available in the~models  \path{./models/tokenizer_(tokenizer_run)}, where \texttt{tokenizer\_run} should be specified as a~parameter. Each of the~training scripts support multiple different parameters that tweak the~model architecture, losses, and more. To get all supported parameters for a~given training script, you can either call \texttt{python (training\_script\_filename).py --help} from the~command line, or view the~source code directly.
 
     \item We can see the~progression of the~training on the~weights and biases website, as well as how the~model performs with actual images. Models are saved automatically during training in the~models folder.
 

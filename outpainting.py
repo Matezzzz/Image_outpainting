@@ -1,12 +1,12 @@
 from itertools import islice
 import argparse
-
+from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
 
 
-from utilities import get_maskgit_fname, get_sharpening_fname, GeneratorProgressBar
+from utilities import get_maskgit_fname, get_sharpening_fname, GeneratorProgressBar, save_images
 from tf_utilities import tf_init
 from maskgit import MaskGIT, MASK_TOKEN
 from dataset import ImageLoading
@@ -26,7 +26,7 @@ parser.add_argument("--threads", default=8, type=int, help="Maximum number of th
 parser.add_argument("--img_size", default=128, type=int, help="Input image size")
 parser.add_argument("--batch_size", default=2, type=int, help="Batch size.")
 parser.add_argument("--attempt_count", default=4, type=int, help="How many times to repeat outpainting for one input image.")
-parser.add_argument("--example_count", default=2, type=int, help="How many times to do the outpainting on a batch")
+parser.add_argument("--example_count", default=6, type=int, help="How many times to do the outpainting on a batch")
 parser.add_argument("--outpaint_range",default=1, type=int, help="How many times to outpaint in each direction")
 parser.add_argument("--generation_temp",default=4.0, type=float, help="How random should the generation be. Not used for simple decoding.")
 parser.add_argument("--samples", default=2, type=int, help="Rendering samples")
@@ -35,8 +35,8 @@ parser.add_argument("--decoding",default="full", type=str, help="What decoding m
 parser.add_argument("--maskgit_steps", default=12, type=int, help="Steps during maskgit generation")
 parser.add_argument("--diffusion_steps", default=50, type=int, help="Steps during diffusion model upscaling")
 
-parser.add_argument("--sides_only", default=False, type=bool, help="Whether to generate only to the sides or in all directions")
-parser.add_argument("--generate_upsampled", default=False, type=bool, help="Whether to generate upscaled images")
+parser.add_argument("--sides_only", default=True, type=bool, help="Whether to generate only to the sides or in all directions")
+parser.add_argument("--generate_upsampled", default=True, type=bool, help="Whether to generate upscaled images")
 
 parser.add_argument("--maskgit_run", default="", type=str, help="The maskgit version to use")
 parser.add_argument("--sharpen_run", default="", type=str, help="The sharpener/upscaler version to use")\
@@ -45,7 +45,7 @@ parser.add_argument("--outpaint_step", default=0.5, type=float, help="The step t
 
 
 
-parser.add_argument("--dataset_location", default="outpaint/comparison", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
+parser.add_argument("--dataset_location", default="outpaint", type=str, help="Directory to read data from. If not set, the path in the environment variable IMAGE_OUTPAINTING_DATASET_LOCATION is used instead.")
 parser.add_argument("--dataset_outpaint_only", default=True, type=bool, help="Whether the specified dataset is used only for outpainting (just contains images to expand) or whether it contains raw data")
 
 
@@ -388,10 +388,10 @@ def main(args):
     if args.dataset_outpaint_only:
         dataset = tf.keras.utils.image_dataset_from_directory("outpaint", labels=None, batch_size=args.batch_size,
                                                               image_size=(args.img_size, args.img_size), shuffle=False)
-        dataset = dataset.map(lambda x: x / 255.0)
+        dataset = dataset.map(lambda x: x / 255.0).as_numpy_iterator()
     else:
         #load the image dataset with a given batch size
-        dataset = ImageLoading(args.dataset_location, args.img_size, stddev_threshold=0.1, monochrome_keep=0.0, shuffle_buffer=0).create_dataset(args.batch_size)
+        dataset = ImageLoading(args.dataset_location, args.img_size, stddev_threshold=0.1, monochrome_keep=0.0, shuffle_buffer=0).create_dataset(args.batch_size).as_numpy_iterator()
 
     #start wandb for logging
     WandbLog.wandb_init("image_outpainting_results", args)
@@ -407,9 +407,14 @@ def main(args):
     #     mask[f[0]:t[0], f[1]:t[1]] = 1.0
     #     Log().log_image("generation mask", mask).commit()
 
+    Path("outpaint_results").mkdir(exist_ok=True)
+
     #go over all batches
-    for batch_i, batch in islice(enumerate(iter(dataset)), args.example_count):
+    for batch_i, batch in enumerate(islice(dataset, args.example_count)):
         print (f"Batch {batch_i+1} out of {args.example_count}:")
+
+        save_images(f"outpaint_results/source_{batch_i}", (batch*255).astype(np.uint8))
+
         #convert the batch images to tokens
         initial_tokens = maskgit.to_tokens(batch)
 
@@ -429,12 +434,15 @@ def main(args):
         #prepare images for being logged to wandb
         log = WandbLog().log_images("Images", batch).log_images("Outpainted low resolution", outpainted_image)
 
+        save_images(f"outpaint_results/outpainted_{batch_i}", (outpainted_image * 255).astype(np.uint8))
+
         #if upscaling should be done
         if args.generate_upsampled:
             print(f" * {'Upscaling:': <20} ", end="", flush=True)
             #create the final, upscaled image
             final_image = upscale_image(outpainted_image, upscaling_model, outpaint_info, args.diffusion_steps)
 
+            save_images(f"outpaint_results/upscaled_{batch_i}", (final_image * 255).astype(np.uint8))
             log.log_images("Outpainted full", final_image)
         #log all images to wandb
         log.commit()

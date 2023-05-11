@@ -4,6 +4,8 @@ wandb
 __pycache__
 .vscode
 artifacts
-models
 image_variances.png
 checkpoint
+_models_old
+outpaint_results
+*.zip
