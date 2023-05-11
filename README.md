@@ -10,7 +10,7 @@ Create a folder in the same directory this readme is in and name it `models`.
 
 Continue by downloading all three models from [google drive](https://drive.google.com/drive/folders/10531XM-ujFrR6iDo_SHgLLb03tbFEShG?usp=sharing), or use the ones downloaded alongside the thesis attachments. After it is done, extract each `.zip`, and place them into the `./models` folder. Be wary of the directory structure - the `saved_model.pb` should be present in the directory of each model (e.g. for the tokenizer, `models/tokenizer_228/saved_model.pb` should exist).
 
-Place all images you want to outpaint in the `./outpaint` folder, then run the `outpainting.py` script. Each image will be resized to $128 \times 128$, then it will be outpainted. Results can be viewed online using the weights and biases library or in the `./outpaint_results` folder.
+Place all images you want to outpaint in the `./outpaint` folder, then run the `outpainting.py` script. Each image will be resized to $128 \times 128$, then it will be outpainted. Results can be viewed online using the weights and biases library or in the `./outpaint_results` folder. If you installed a version of tensorflow that is CPU-only, specify the parameter `--use_gpu=-1` to avoid using GPU entirely.
 
 Run `python outpainting.py --help` to display all available parameters, feel free to tweak them and run outpainting again.
 
